@@ -23,6 +23,8 @@ interface PendingCapture {
 let pendingCaptures: PendingCapture[] = [];
 /** 自上次 tick 以来新到的波形帧数（用于状态栏低频展示） */
 let waveFramesSinceTick = 0;
+/** 波形计数上次刷新时间（限 1Hz） */
+let lastWaveFlushMs = 0;
 
 const WAVE_CONFIG_KEY = "rm-chrono-wave-config";
 
@@ -193,8 +195,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         s.lastEventAt !== 0 && nowMs - s.lastEventAt <= OFFLINE_TIMEOUT_MS;
       if (online !== s.online) set({ online });
     }
-    // 低频刷新波形帧计数 / 通道数
-    if (waveFramesSinceTick > 0 || s.waveChannelCount !== waveBuffer.channelCount) {
+    // 低频刷新波形帧计数 / 通道数（最多 1Hz，避免高频重渲染）
+    if (
+      (waveFramesSinceTick > 0 && nowMs - lastWaveFlushMs >= 1000) ||
+      s.waveChannelCount !== waveBuffer.channelCount
+    ) {
+      lastWaveFlushMs = nowMs;
       set({
         waveFrames: s.waveFrames + waveFramesSinceTick,
         waveChannelCount: waveBuffer.channelCount,

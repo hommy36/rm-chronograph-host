@@ -28,6 +28,8 @@ export default function ShotsTable() {
 
   const handleExport = async (all: boolean) => {
     setExporting(true);
+    // 让出一帧让 loading 状态先渲染，再做同步的 CSV 构建
+    await new Promise((r) => setTimeout(r, 0));
     const cfg = withWave ? waveConfig : null;
     try {
       if (all) {

@@ -6,6 +6,8 @@
 /** 快照窗口: 发射前 200 ms ~ 发射后 1000 ms */
 export const SNAP_PRE_MS = 200;
 export const SNAP_POST_MS = 1000;
+/** 快照最大点数: 高采样率源（kHz 级）抽稀, 保证导出/渲染开销有界 */
+export const MAX_SNAP_POINTS = 1500;
 
 export interface WaveSnapshot {
   /** 发射时刻(弹速帧接收时间) */
@@ -73,15 +75,19 @@ export class WaveBuffer {
   }
 }
 
-/** 以 t0 为锚点从缓冲提取一发快照; 数据不足返回 null */
+/** 以 t0 为锚点从缓冲提取一发快照; 数据不足返回 null。超采样时按步长抽稀 */
 export function takeSnapshot(buf: WaveBuffer, t0: number): WaveSnapshot | null {
   const s = buf.slice(t0 - SNAP_PRE_MS, t0 + SNAP_POST_MS);
   if (!s || s.times.length < 8) return null;
-  return {
-    t0,
-    times: s.times.map((t) => t - t0),
-    channels: s.channels,
-  };
+  const n = s.times.length;
+  const stride = Math.max(1, Math.ceil(n / MAX_SNAP_POINTS));
+  const times: number[] = [];
+  const channels: number[][] = s.channels.map(() => []);
+  for (let i = 0; i < n; i += stride) {
+    times.push(s.times[i] - t0);
+    for (let c = 0; c < s.channels.length; c++) channels[c].push(s.channels[c][i]);
+  }
+  return { t0, times, channels };
 }
 
 /**

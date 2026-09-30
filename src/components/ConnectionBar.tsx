@@ -26,7 +26,9 @@ export default function ConnectionBar(props: {
   demoOn: boolean;
   onToggleDemo: (on: boolean) => void;
 }) {
-  const { connected, portName, online, counters } = useAppStore();
+  const connected = useAppStore((s) => s.connected);
+  const portName = useAppStore((s) => s.portName);
+  const online = useAppStore((s) => s.online);
   const waveConnected = useAppStore((s) => s.waveConnected);
   const wavePortName = useAppStore((s) => s.wavePortName);
   const waveChannelCount = useAppStore((s) => s.waveChannelCount);
@@ -38,6 +40,15 @@ export default function ConnectionBar(props: {
   const [waveBusy, setWaveBusy] = useState(false);
   const [waveBaud, setWaveBaud] = useState<number>(loadWaveBaud);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /** 帧/心跳/CRC 计数低频轮询显示（500ms），避免 10Hz 心跳驱动顶栏重渲染 */
+  const [counters, setCounters] = useState(() => useAppStore.getState().counters);
+  useEffect(() => {
+    const t = window.setInterval(
+      () => setCounters(useAppStore.getState().counters),
+      500
+    );
+    return () => clearInterval(t);
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
