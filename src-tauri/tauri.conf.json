@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "velocity-measure-host",
+  "productName": "rm-chronograph-host",
   "version": "0.1.0",
-  "identifier": "com.tauri-app.host_computer",
+  "identifier": "com.rm-chronograph.host",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",

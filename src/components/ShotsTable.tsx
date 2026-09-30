@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Button, Card, message, Space, Table } from "antd";
-import { DownloadOutlined } from "@ant-design/icons";
+import { Button, Card, Checkbox, message, Space, Table, Tooltip } from "antd";
+import { DownloadOutlined, LineChartOutlined } from "@ant-design/icons";
 import { useAppStore } from "../store";
 import { buildAllGroupsCsv, buildGroupCsv, saveCsv } from "../csv";
 import type { Shot } from "../types";
+import ShotWaveModal from "./ShotWaveModal";
 
 function fmtTime(ms: number): string {
   const d = new Date(ms);
@@ -19,20 +20,29 @@ export default function ShotsTable() {
   const viewingGroupId = useAppStore((s) => s.viewingGroupId);
   const group = groups.find((g) => g.id === viewingGroupId) ?? null;
   const [exporting, setExporting] = useState(false);
+  /** 导出时是否附带摩擦轮掉速指标列 */
+  const [withWave, setWithWave] = useState(true);
+  const waveConfig = useAppStore((s) => s.waveConfig);
+  /** 掉速详情弹窗：正在查看的发序号 */
+  const [waveShotIdx, setWaveShotIdx] = useState<number | null>(null);
 
   const handleExport = async (all: boolean) => {
     setExporting(true);
+    const cfg = withWave ? waveConfig : null;
     try {
       if (all) {
         if (groups.length === 0) return;
         const ok = await saveCsv(
           `测速汇总_${new Date().toISOString().slice(0, 10)}.csv`,
-          buildAllGroupsCsv(groups)
+          buildAllGroupsCsv(groups, cfg)
         );
         if (ok) message.success("已导出全部组汇总");
       } else {
         if (!group) return;
-        const ok = await saveCsv(`${group.name}_明细.csv`, buildGroupCsv(group));
+        const ok = await saveCsv(
+          `${group.name}_明细.csv`,
+          buildGroupCsv(group, cfg)
+        );
         if (ok) message.success(`已导出 ${group.name}`);
       }
     } catch (e) {
@@ -50,6 +60,14 @@ export default function ShotsTable() {
       styles={{ body: { flex: 1, minHeight: 0, overflow: "auto", padding: 0 } }}
       extra={
         <Space>
+          <Tooltip title="导出时每发追加摩擦轮基线/掉速量/掉速%/恢复时间及组内轮间差（需已连接过波形口）">
+            <Checkbox
+              checked={withWave}
+              onChange={(e) => setWithWave(e.target.checked)}
+            >
+              含摩擦轮数据
+            </Checkbox>
+          </Tooltip>
           <Button
             size="small"
             icon={<DownloadOutlined />}
@@ -77,6 +95,12 @@ export default function ShotsTable() {
         dataSource={group ? [...group.shots].reverse() : []}
         pagination={false}
         sticky
+        onRow={(shot) => ({
+          onClick: () => {
+            if (shot.wave) setWaveShotIdx(shot.idx);
+          },
+          style: shot.wave ? { cursor: "pointer" } : undefined,
+        })}
         columns={[
           { title: "序号", dataIndex: "idx", width: 80 },
           {
@@ -90,8 +114,27 @@ export default function ShotsTable() {
             dataIndex: "at_ms",
             render: (v: number) => fmtTime(v),
           },
+          {
+            title: "掉速",
+            key: "wave",
+            width: 64,
+            render: (_: unknown, shot: Shot) =>
+              shot.wave ? (
+                <Tooltip title="查看该发掉速/恢复曲线">
+                  <LineChartOutlined style={{ color: "#1677ff" }} />
+                </Tooltip>
+              ) : null,
+          },
         ]}
       />
+      {group && waveShotIdx !== null && (
+        <ShotWaveModal
+          group={group}
+          shotIdx={waveShotIdx}
+          onClose={() => setWaveShotIdx(null)}
+          onNavigate={(idx) => setWaveShotIdx(idx)}
+        />
+      )}
     </Card>
   );
 }

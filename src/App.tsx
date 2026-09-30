@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Layout } from "antd";
 import { listen } from "@tauri-apps/api/event";
-import { isTauri } from "./api";
+import { isTauri, b64ToBytes } from "./api";
 import { useAppStore } from "./store";
 import { Simulator } from "./simulator";
 import type { SpeedFrameMsg } from "./types";
@@ -33,6 +33,12 @@ function useSerialEvents() {
       listen("proto://crc_error", () => store.getState().onCrcError()),
       listen("proto://disconnected", () => {
         store.getState().markDisconnected();
+      }),
+      listen<{ at_ms: number; b64: string }>("wave://bytes", (e) =>
+        store.getState().onWaveBytes(e.payload.at_ms, b64ToBytes(e.payload.b64))
+      ),
+      listen("wave://disconnected", () => {
+        store.getState().setWaveConnected(null);
       }),
     ];
     return () => {
@@ -66,15 +72,19 @@ export default function App() {
         onHeartbeat: (at) => useAppStore.getState().onHeartbeat(at),
         onFrame: (msg) => useAppStore.getState().onFrame(msg),
         onCrcError: () => useAppStore.getState().onCrcError(),
+        onWaveBytes: (at, bytes) => useAppStore.getState().onWaveBytes(at, bytes),
       });
       simulatorRef.current = sim;
       sim.start();
       store.setConnected(null, true);
+      // 模拟模式下波形口随主链路一起"连接"
+      if (!store.waveConnected) store.setWaveConnected("模拟");
       setDemoOn(true);
     } else {
       simulatorRef.current?.stop();
       simulatorRef.current = null;
       store.markDisconnected();
+      if (store.wavePortName === "模拟") store.setWaveConnected(null);
       setDemoOn(false);
     }
   };
@@ -122,7 +132,7 @@ export default function App() {
             flexShrink: 0,
             minHeight: 0,
             background: "#f0f2f5",
-            padding: 12,
+            padding: "12px 6px 12px 12px",
             display: "flex",
             flexDirection: "column",
           }}
@@ -132,7 +142,7 @@ export default function App() {
         </div>
         <Content
           style={{
-            padding: 12,
+            padding: "12px 12px 12px 6px",
             overflow: "auto",
             display: "flex",
             flexDirection: "column",

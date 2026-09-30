@@ -1,18 +1,33 @@
 import { useCallback, useEffect, useState } from "react";
-import { Badge, Button, message, Select, Space, Switch, Tooltip } from "antd";
-import { LinkOutlined, ReloadOutlined } from "@ant-design/icons";
-import { connectSerial, disconnectSerial, isTauri, listPorts } from "../api";
+import { Badge, Button, Divider, message, Select, Space, Switch, Tooltip } from "antd";
+import { LinkOutlined, ReloadOutlined, SettingOutlined } from "@ant-design/icons";
+import {
+  connectSerial,
+  connectWaveSerial,
+  disconnectSerial,
+  disconnectWaveSerial,
+  isTauri,
+  listPorts,
+} from "../api";
 import type { PortItem } from "../api";
 import { useAppStore } from "../store";
+import WaveSettingsModal from "./WaveSettingsModal";
 
 export default function ConnectionBar(props: {
   demoOn: boolean;
   onToggleDemo: (on: boolean) => void;
 }) {
   const { connected, portName, online, counters } = useAppStore();
+  const waveConnected = useAppStore((s) => s.waveConnected);
+  const wavePortName = useAppStore((s) => s.wavePortName);
+  const waveChannelCount = useAppStore((s) => s.waveChannelCount);
+  const waveFrames = useAppStore((s) => s.waveFrames);
   const [ports, setPorts] = useState<PortItem[]>([]);
   const [selected, setSelected] = useState<string | undefined>();
+  const [waveSelected, setWaveSelected] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
+  const [waveBusy, setWaveBusy] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -21,10 +36,13 @@ export default function ConnectionBar(props: {
       if (list.length > 0 && !list.some((p) => p.name === selected)) {
         setSelected(list[0].name);
       }
+      if (list.length > 0 && !list.some((p) => p.name === waveSelected)) {
+        setWaveSelected(list[0].name);
+      }
     } catch (e) {
       message.error(`枚举串口失败：${e}`);
     }
-  }, [selected]);
+  }, [selected, waveSelected]);
 
   useEffect(() => {
     refresh();
@@ -53,6 +71,29 @@ export default function ConnectionBar(props: {
     }
   };
 
+  const handleWaveConnect = async () => {
+    if (!waveSelected) return;
+    setWaveBusy(true);
+    try {
+      await connectWaveSerial(waveSelected);
+      useAppStore.getState().setWaveConnected(waveSelected);
+    } catch (e) {
+      message.error(String(e));
+    } finally {
+      setWaveBusy(false);
+    }
+  };
+
+  const handleWaveDisconnect = async () => {
+    setWaveBusy(true);
+    try {
+      await disconnectWaveSerial();
+    } finally {
+      useAppStore.getState().setWaveConnected(null);
+      setWaveBusy(false);
+    }
+  };
+
   const status = !connected ? (
     <Badge status="default" text="未连接" />
   ) : online ? (
@@ -62,17 +103,20 @@ export default function ConnectionBar(props: {
   );
 
   return (
-    <Space size="middle" wrap>
-      <span style={{ fontWeight: 600, fontSize: 16 }}>测速模块上位机</span>
+    <Space size={8} wrap={false} style={{ maxWidth: "100%", overflow: "hidden" }}>
+      <span style={{ fontWeight: 600, fontSize: 16, whiteSpace: "nowrap" }}>
+        测速模块上位机
+      </span>
       <Select
-        style={{ minWidth: 220 }}
-        placeholder={isTauri() ? "选择串口" : "桌面 App 中可用"}
+        style={{ width: 190 }}
+        placeholder={isTauri() ? "测速口" : "桌面 App 中可用"}
         value={selected}
         onChange={setSelected}
         disabled={connected || props.demoOn || !isTauri()}
         options={ports.map((p) => ({
           value: p.name,
           label: `${p.name}（${p.description}）`,
+          disabled: p.name === wavePortName,
         }))}
         notFoundContent="未发现串口"
       />
@@ -98,7 +142,7 @@ export default function ConnectionBar(props: {
           连接
         </Button>
       )}
-      <Space size={4}>
+      <Space size={4} style={{ whiteSpace: "nowrap" }}>
         <span>模拟数据</span>
         <Switch
           checked={props.demoOn}
@@ -106,12 +150,55 @@ export default function ConnectionBar(props: {
           disabled={connected && !props.demoOn}
         />
       </Space>
-      {status}
-      <span style={{ color: "#888" }}>
-        帧 {counters.frames} · 心跳 {counters.heartbeats} · CRC错{" "}
-        {counters.crcErrors}
-        {portName ? ` · ${portName}` : ""}
-      </span>
+      <span style={{ whiteSpace: "nowrap" }}>{status}</span>
+      <Tooltip
+        title={`数据帧 ${counters.frames} · 心跳 ${counters.heartbeats} · CRC校验失败 ${counters.crcErrors}${portName ? ` · ${portName}` : ""}`}
+      >
+        <span style={{ color: "#888", whiteSpace: "nowrap", cursor: "default" }}>
+          帧{counters.frames}·跳{counters.heartbeats}·CRC{counters.crcErrors}
+        </span>
+      </Tooltip>
+      <Divider type="vertical" />
+      <Select
+        style={{ width: 190 }}
+        placeholder={isTauri() ? "波形口 (JustFloat)" : "桌面 App 中可用"}
+        value={waveSelected}
+        onChange={setWaveSelected}
+        disabled={waveConnected || !isTauri()}
+        options={ports.map((p) => ({
+          value: p.name,
+          label: `${p.name}（${p.description}）`,
+          disabled: p.name === portName,
+        }))}
+        notFoundContent="未发现串口"
+      />
+      {waveConnected ? (
+        <Button danger onClick={handleWaveDisconnect} loading={waveBusy}>
+          断开
+        </Button>
+      ) : (
+        <Tooltip title="连接波形口（VOFA+ JustFloat 摩擦轮转速）">
+          <Button
+            icon={<LinkOutlined />}
+            onClick={handleWaveConnect}
+            loading={waveBusy}
+            disabled={!waveSelected || !isTauri()}
+          >
+            连接
+          </Button>
+        </Tooltip>
+      )}
+      <Tooltip title="波形通道设置（通道→摩擦轮组）">
+        <Button icon={<SettingOutlined />} onClick={() => setSettingsOpen(true)} />
+      </Tooltip>
+      {waveConnected && (
+        <Tooltip title={`波形通道数 ${waveChannelCount} · 波形帧 ${waveFrames}${wavePortName ? ` · ${wavePortName}` : ""}`}>
+          <span style={{ color: "#888", whiteSpace: "nowrap", cursor: "default" }}>
+            波{waveChannelCount}ch·{waveFrames}
+          </span>
+        </Tooltip>
+      )}
+      <WaveSettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </Space>
   );
 }

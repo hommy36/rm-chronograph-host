@@ -84,7 +84,7 @@ export default function ChartsGrid() {
     return {
       animationDurationUpdate: 250,
       animationEasingUpdate: "cubicOut",
-      title: { text: "时间序列图（含最值标注）", top: 2, textStyle: titleStyle },
+      title: { text: "时间序列图", top: 2, textStyle: titleStyle },
       grid: baseGrid,
       tooltip: { trigger: "axis", valueFormatter: (v) => Number(v).toFixed(3) },
       xAxis: xAxis(idxs, "数据点序号"),
@@ -178,7 +178,7 @@ export default function ChartsGrid() {
       animationDurationUpdate: 250,
       animationEasingUpdate: "cubicOut",
       title: {
-        text: "移动平均图（含方差带）",
+        text: "移动平均图",
         subtext: `总方差: ${stats ? stats.variance.toFixed(6) : "--"}`,
         left: 8,
         top: 2,

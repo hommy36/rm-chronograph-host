@@ -22,6 +22,23 @@ export async function disconnectSerial(): Promise<void> {
   return invoke("disconnect_serial");
 }
 
+export async function connectWaveSerial(portName: string): Promise<void> {
+  return invoke("connect_wave_serial", { portName });
+}
+
+export async function disconnectWaveSerial(): Promise<void> {
+  if (!isTauri()) return;
+  return invoke("disconnect_wave_serial");
+}
+
+/** base64 → 字节数组（波形口事件载荷解码） */
+export function b64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
 export async function writeTextFile(
   path: string,
   contents: string

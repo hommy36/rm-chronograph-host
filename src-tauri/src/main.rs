@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    host_computer_lib::run()
+    rm_chronograph_host_lib::run()
 }

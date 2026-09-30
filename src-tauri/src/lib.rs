@@ -16,6 +16,9 @@ const EVT_HEARTBEAT: &str = "proto://heartbeat";
 const EVT_FRAME: &str = "proto://frame";
 const EVT_CRC_ERROR: &str = "proto://crc_error";
 const EVT_DISCONNECTED: &str = "proto://disconnected";
+/// 波形口（VOFA+ JustFloat）：原始字节透传，前端统一解析
+const EVT_WAVE_BYTES: &str = "wave://bytes";
+const EVT_WAVE_DISCONNECTED: &str = "wave://disconnected";
 
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -63,8 +66,21 @@ struct SerialState {
     session: Mutex<Option<SerialSession>>,
 }
 
-fn stop_session(state: &SerialState) {
-    let session = state.session.lock().unwrap().take();
+/// 波形口（JustFloat 数据源）独立会话
+#[derive(Default)]
+struct WaveSerialState {
+    session: Mutex<Option<SerialSession>>,
+}
+
+#[derive(Serialize, Clone)]
+struct WaveBytesPayload {
+    at_ms: u64,
+    /// base64 编码的原始字节
+    b64: String,
+}
+
+fn stop_session(session_slot: &Mutex<Option<SerialSession>>) {
+    let session = session_slot.lock().unwrap().take();
     if let Some(session) = session {
         session.cancel.store(true, Ordering::Relaxed);
         if let Some(handle) = session.handle {
@@ -98,7 +114,7 @@ fn connect_serial(
     state: State<'_, SerialState>,
     port_name: String,
 ) -> Result<(), String> {
-    stop_session(&state);
+    stop_session(&state.session);
 
     let mut port = serialport::new(&port_name, BAUD_RATE)
         .data_bits(serialport::DataBits::Eight)
@@ -169,7 +185,74 @@ fn connect_serial(
 
 #[tauri::command]
 fn disconnect_serial(state: State<'_, SerialState>) {
-    stop_session(&state);
+    stop_session(&state.session);
+}
+
+/// 连接波形口：只读字节流并通过 wave://bytes 事件透传（前端解析 JustFloat）
+#[tauri::command]
+fn connect_wave_serial(
+    app: AppHandle,
+    state: State<'_, WaveSerialState>,
+    port_name: String,
+) -> Result<(), String> {
+    stop_session(&state.session);
+
+    let mut port = serialport::new(&port_name, BAUD_RATE)
+        .data_bits(serialport::DataBits::Eight)
+        .parity(serialport::Parity::None)
+        .stop_bits(serialport::StopBits::One)
+        .flow_control(serialport::FlowControl::None)
+        .timeout(Duration::from_millis(READ_TIMEOUT_MS))
+        .open()
+        .map_err(|e| format!("打开波形口 {port_name} 失败：{e}"))?;
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_thread = cancel.clone();
+
+    let handle = std::thread::spawn(move || {
+        use base64::Engine;
+        let mut buf = [0u8; 1024];
+        loop {
+            if cancel_thread.load(Ordering::Relaxed) {
+                break;
+            }
+            match port.read(&mut buf) {
+                Ok(n) if n > 0 => {
+                    let _ = app.emit(
+                        EVT_WAVE_BYTES,
+                        WaveBytesPayload {
+                            at_ms: now_ms(),
+                            b64: base64::engine::general_purpose::STANDARD.encode(&buf[..n]),
+                        },
+                    );
+                }
+                Ok(_) => {}
+                Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {}
+                Err(e) => {
+                    if !cancel_thread.load(Ordering::Relaxed) {
+                        let _ = app.emit(
+                            EVT_WAVE_DISCONNECTED,
+                            DisconnectedPayload {
+                                reason: e.to_string(),
+                            },
+                        );
+                    }
+                    break;
+                }
+            }
+        }
+    });
+
+    *state.session.lock().unwrap() = Some(SerialSession {
+        cancel,
+        handle: Some(handle),
+    });
+    Ok(())
+}
+
+#[tauri::command]
+fn disconnect_wave_serial(state: State<'_, WaveSerialState>) {
+    stop_session(&state.session);
 }
 
 /// 导出 CSV：前端弹完保存对话框后，把内容交给 Rust 写盘
@@ -194,10 +277,13 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(SerialState::default())
+        .manage(WaveSerialState::default())
         .invoke_handler(tauri::generate_handler![
             list_ports,
             connect_serial,
             disconnect_serial,
+            connect_wave_serial,
+            disconnect_wave_serial,
             write_text_file,
             write_binary_file
         ])
