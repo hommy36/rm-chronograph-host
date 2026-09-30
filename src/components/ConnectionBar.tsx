@@ -13,6 +13,15 @@ import type { PortItem } from "../api";
 import { useAppStore } from "../store";
 import WaveSettingsModal from "./WaveSettingsModal";
 
+/** 波形口可选波特率（测速口协议固定 115200，不可调） */
+const WAVE_BAUDS = [9600, 57600, 115200, 230400, 460800, 921600, 1000000, 2000000];
+const WAVE_BAUD_KEY = "rm-chrono-wave-baud";
+
+function loadWaveBaud(): number {
+  const v = Number(localStorage.getItem(WAVE_BAUD_KEY));
+  return WAVE_BAUDS.includes(v) ? v : 115200;
+}
+
 export default function ConnectionBar(props: {
   demoOn: boolean;
   onToggleDemo: (on: boolean) => void;
@@ -27,6 +36,7 @@ export default function ConnectionBar(props: {
   const [waveSelected, setWaveSelected] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const [waveBusy, setWaveBusy] = useState(false);
+  const [waveBaud, setWaveBaud] = useState<number>(loadWaveBaud);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -75,7 +85,7 @@ export default function ConnectionBar(props: {
     if (!waveSelected) return;
     setWaveBusy(true);
     try {
-      await connectWaveSerial(waveSelected);
+      await connectWaveSerial(waveSelected, waveBaud);
       useAppStore.getState().setWaveConnected(waveSelected);
     } catch (e) {
       message.error(String(e));
@@ -172,6 +182,22 @@ export default function ConnectionBar(props: {
         }))}
         notFoundContent="未发现串口"
       />
+      <Tooltip title="波形口波特率">
+        <Select
+          style={{ width: 104 }}
+          value={waveBaud}
+          onChange={(v) => {
+            setWaveBaud(v);
+            try {
+              localStorage.setItem(WAVE_BAUD_KEY, String(v));
+            } catch {
+              // 忽略持久化失败
+            }
+          }}
+          disabled={waveConnected || !isTauri()}
+          options={WAVE_BAUDS.map((b) => ({ value: b, label: String(b) }))}
+        />
+      </Tooltip>
       {waveConnected ? (
         <Button danger onClick={handleWaveDisconnect} loading={waveBusy}>
           断开

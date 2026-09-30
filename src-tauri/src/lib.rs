@@ -194,10 +194,11 @@ fn connect_wave_serial(
     app: AppHandle,
     state: State<'_, WaveSerialState>,
     port_name: String,
+    baud_rate: u32,
 ) -> Result<(), String> {
     stop_session(&state.session);
 
-    let mut port = serialport::new(&port_name, BAUD_RATE)
+    let mut port = serialport::new(&port_name, baud_rate)
         .data_bits(serialport::DataBits::Eight)
         .parity(serialport::Parity::None)
         .stop_bits(serialport::StopBits::One)

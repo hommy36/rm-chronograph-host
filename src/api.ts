@@ -22,8 +22,11 @@ export async function disconnectSerial(): Promise<void> {
   return invoke("disconnect_serial");
 }
 
-export async function connectWaveSerial(portName: string): Promise<void> {
-  return invoke("connect_wave_serial", { portName });
+export async function connectWaveSerial(
+  portName: string,
+  baudRate: number
+): Promise<void> {
+  return invoke("connect_wave_serial", { portName, baudRate });
 }
 
 export async function disconnectWaveSerial(): Promise<void> {
