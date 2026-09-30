@@ -30,6 +30,7 @@ interface Row {
   key: string;
   label: string;
   color: string;
+  flat: boolean;
   groupName: string | null;
   groupColor: string;
   baseline: number;
@@ -76,6 +77,23 @@ export default function ShotWaveModal(props: {
     return wave.channels.map((s) => smoothSeries(s, smoothWin));
   }, [wave, smoothWin]);
 
+  /** 平直通道（全程无变化，如未使用的恒零通道） */
+  const flatChannels = useMemo(() => {
+    const set = new Set<number>();
+    if (!wave) return set;
+    wave.channels.forEach((s, ch) => {
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (const v of s) {
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+      }
+      if (hi - lo < 1e-6) set.add(ch);
+    });
+    return set;
+  }, [wave]);
+  const [hideFlat, setHideFlat] = useState(true);
+
   const rows: Row[] = useMemo(() => {
     if (!wave) return [];
     return wave.channels.map((_raw, ch) => {
@@ -85,6 +103,7 @@ export default function ShotWaveModal(props: {
         key: String(ch),
         label: labelOf(ch),
         color: channelColor(ch),
+        flat: flatChannels.has(ch),
         groupName: grp?.name ?? null,
         groupColor: grp?.color ?? "#888",
         baseline: m?.baseline ?? 0,
@@ -94,7 +113,7 @@ export default function ShotWaveModal(props: {
       };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wave, smoothed, channelOf, waveConfig]);
+  }, [wave, smoothed, channelOf, waveConfig, flatChannels]);
 
   const groupSpreads = useMemo(() => {
     if (!wave) return [];
@@ -113,25 +132,28 @@ export default function ShotWaveModal(props: {
 
   const option = useMemo<EChartsOption>(() => {
     if (!wave) return {};
-    const series: SeriesOption[] = wave.channels.map((raw, ch) => {
-      const color = channelColor(ch);
-      const pts = wave.times.map((t, i) => [
-        t,
-        showRaw ? raw[i] : smoothed[ch][i],
-      ]);
-      return {
-        name: labelOf(ch),
-        type: "line",
-        data: pts,
-        showSymbol: false,
-        lineStyle: { width: 1.5, color },
-        itemStyle: { color },
-        emphasis: { focus: "series" },
-      };
-    });
+    const series: SeriesOption[] = wave.channels
+      .map((raw, ch) => ({ raw, ch }))
+      .filter(({ ch }) => !(hideFlat && flatChannels.has(ch)))
+      .map(({ raw, ch }) => {
+        const color = channelColor(ch);
+        const pts = wave.times.map((t, i) => [
+          t,
+          showRaw ? raw[i] : smoothed[ch][i],
+        ]);
+        return {
+          name: labelOf(ch),
+          type: "line",
+          data: pts,
+          showSymbol: false,
+          lineStyle: { width: 1.5, color },
+          itemStyle: { color },
+          emphasis: { focus: "series" },
+        };
+      });
     return {
       animation: false,
-      grid: { left: 70, right: 30, top: 46, bottom: 60 },
+      grid: { left: 70, right: 46, top: 46, bottom: 60 },
       legend: { type: "scroll", top: 4, textStyle: { fontSize: 11 } },
       tooltip: { trigger: "axis", valueFormatter: (v) => Number(v).toFixed(1) },
       xAxis: {
@@ -144,8 +166,10 @@ export default function ShotWaveModal(props: {
       },
       yAxis: { type: "value", scale: true },
       dataZoom: [
-        { type: "inside" },
-        { type: "slider", height: 18, bottom: 6 },
+        { type: "inside", xAxisIndex: 0, zoomOnMouseWheel: true },
+        { type: "inside", yAxisIndex: 0, zoomOnMouseWheel: "shift" },
+        { type: "slider", xAxisIndex: 0, height: 18, bottom: 6 },
+        { type: "slider", yAxisIndex: 0, width: 14, right: 8 },
       ],
       series: [
         ...series,
@@ -164,7 +188,7 @@ export default function ShotWaveModal(props: {
         },
       ],
     };
-  }, [wave, smoothed, showRaw, channelOf, waveConfig]);
+  }, [wave, smoothed, showRaw, channelOf, waveConfig, hideFlat, flatChannels]);
 
   const hasPrev = props.shotIdx > 1;
   const hasNext = props.shotIdx < props.group.shots.length;
@@ -203,6 +227,10 @@ export default function ShotWaveModal(props: {
             <span>
               原始{" "}
               <Switch size="small" checked={showRaw} onChange={setShowRaw} />
+            </span>
+            <span>
+              隐藏平直通道{" "}
+              <Switch size="small" checked={hideFlat} onChange={setHideFlat} />
             </span>
             <span>
               平滑窗口{" "}
@@ -259,6 +287,7 @@ export default function ShotWaveModal(props: {
                       }}
                     />
                     {v}
+                    {r.flat && <Tag style={{ marginInlineStart: 2 }}>平直</Tag>}
                     {r.groupName && (
                       <Tag color={r.groupColor} style={{ marginInlineStart: 2 }}>
                         {r.groupName}
