@@ -107,6 +107,8 @@ interface AppState {
   }) => void;
   /** 清理历史波形快照（保留指标可导出的弹速数据），释放磁盘/内存 */
   clearWaveforms: () => void;
+  /** 删除单个组（含其弹速与波形数据） */
+  deleteGroup: (id: number) => void;
 }
 
 function makeGroup(id: number, name: string, params: GroupParams): Group {
@@ -361,4 +363,21 @@ export const useAppStore = create<AppState>((set, get) => ({
         ),
       })),
     })),
+
+  deleteGroup: (id) =>
+    set((s) => {
+      pendingCaptures = pendingCaptures.filter((p) => p.groupId !== id);
+      const groups = s.groups.filter((g) => g.id !== id);
+      return {
+        groups,
+        activeGroupId: s.activeGroupId === id ? null : s.activeGroupId,
+        viewingGroupId:
+          s.viewingGroupId === id
+            ? groups.length > 0
+              ? groups[groups.length - 1].id
+              : null
+            : s.viewingGroupId,
+        compareIds: s.compareIds.filter((x) => x !== id),
+      };
+    }),
 }));

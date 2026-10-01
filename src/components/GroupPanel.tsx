@@ -67,6 +67,7 @@ export default function GroupPanel() {
   const compareIds = useAppStore((s) => s.compareIds);
   const toggleCompare = useAppStore((s) => s.toggleCompare);
   const clearWaveforms = useAppStore((s) => s.clearWaveforms);
+  const deleteGroup = useAppStore((s) => s.deleteGroup);
   const [compareOpen, setCompareOpen] = useState(false);
   const [ioBusy, setIoBusy] = useState(false);
 
@@ -407,8 +408,33 @@ export default function GroupPanel() {
                       />
                     )}
                   </span>
-                  <span style={{ color: "#999", fontSize: 12, flexShrink: 0 }}>
-                    {g.shots.length} 发
+                  <span
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 4,
+                      flexShrink: 0,
+                    }}
+                  >
+                    <span style={{ color: "#999", fontSize: 12 }}>
+                      {g.shots.length} 发
+                    </span>
+                    <Popconfirm
+                      title={`删除「${g.name}」？`}
+                      description={`该组 ${g.shots.length} 发数据（含波形）将被删除`}
+                      okText="删除"
+                      okButtonProps={{ danger: true }}
+                      cancelText="取消"
+                      onConfirm={() => deleteGroup(g.id)}
+                    >
+                      <Button
+                        size="small"
+                        type="text"
+                        danger
+                        icon={<DeleteOutlined />}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    </Popconfirm>
                   </span>
                 </div>
               </Tooltip>
