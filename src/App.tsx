@@ -123,10 +123,24 @@ function useSessionPersistence() {
   }, []);
 }
 
+/** 未落在投放区的拖放一律拦掉，避免 WebView 直接导航到被拖入的文件 */
+function useGlobalDropGuard() {
+  useEffect(() => {
+    const prevent = (e: DragEvent) => e.preventDefault();
+    window.addEventListener("dragover", prevent);
+    window.addEventListener("drop", prevent);
+    return () => {
+      window.removeEventListener("dragover", prevent);
+      window.removeEventListener("drop", prevent);
+    };
+  }, []);
+}
+
 export default function App() {
   useSerialEvents();
   useOfflineWatchdog();
   useSessionPersistence();
+  useGlobalDropGuard();
 
   const [demoOn, setDemoOn] = useState(false);
   const [view, setView] = useState<MainView>("charts");

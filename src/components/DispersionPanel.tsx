@@ -612,6 +612,30 @@ export default function DispersionPanel(props: { onBack: () => void }) {
     if (f && f.type.startsWith("image/")) loadFile(f);
   };
 
+  // Ctrl+V 直接粘贴图片（Win+Shift+S 截图后最顺手）
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.startsWith("image/")) {
+          const f = item.getAsFile();
+          if (f) {
+            e.preventDefault();
+            loadFile(f);
+            message.success("已从剪贴板载入图片");
+            return;
+          }
+        }
+      }
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+    // loadFile 依赖当前面板状态，这里只在挂载时注册
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!img) return;
     // 以元素实际显示尺寸换算图像坐标：任何缩放方式下都精确
@@ -1117,7 +1141,7 @@ export default function DispersionPanel(props: { onBack: () => void }) {
                 style={{ fontSize: 44, color: "#1677ff", marginBottom: 12 }}
               />
               <div style={{ fontSize: 15, fontWeight: 500 }}>
-                点击或拖拽上传靶纸图片
+                点击 / 拖拽 / Ctrl+V 粘贴上传靶纸图片
               </div>
               <div style={{ fontSize: 12, color: "#999", marginTop: 6 }}>
                 支持 JPG / PNG · 上传后可先做「裁剪标定」框选靶纸

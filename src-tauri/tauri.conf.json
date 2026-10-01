@@ -14,6 +14,7 @@
       {
         "title": "测速模块上位机",
         "decorations": false,
+        "dragDropEnabled": false,
         "width": 1440,
         "height": 900,
         "minWidth": 1180,
