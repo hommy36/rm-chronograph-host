@@ -479,3 +479,154 @@ export function groupSummary(
     meanRing: geo ? geo.meanRing : null,
   };
 }
+
+
+/* ===================== 跨多组（当日）分析 ===================== */
+
+export interface CrossGroupStats {
+  id: number;
+  name: string;
+  n: number;
+  mean: number;
+  /** 前 k 发均值（冷枪段） */
+  firstK: number;
+  /** 其余发均值（热枪段） */
+  restMean: number;
+  /** 冷枪效应 = 前 k 发 − 其余发（正=开机头几发偏快） */
+  coldDelta: number;
+  /** 组内后 3 发均值 */
+  tail3: number | null;
+  /** 组内热枪效应 = 后3发 − 前3发 */
+  hotDelta: number | null;
+  cv: number | null;
+  /** 该组开始时间（按时间排序用） */
+  startedAt: number;
+}
+
+/** 跨多组统计：把每组按时间顺序排好，给出冷枪段/热枪段对照 */
+export function crossGroupStats(groups: Group[], k = 3): CrossGroupStats[] {
+  return [...groups]
+    .sort((a, b) => a.startedAt - b.startedAt || a.id - b.id)
+    .map((g) => {
+      const v = g.shots.map((s) => s.speed_mps);
+      const n = v.length;
+      const mean = n > 0 ? v.reduce((a, b) => a + b, 0) / n : 0;
+      const kk = Math.min(k, Math.max(1, Math.floor(n / 2)));
+      const head = v.slice(0, kk);
+      const rest = v.slice(kk);
+      const meanOf = (a: number[]) =>
+        a.length > 0 ? a.reduce((x, y) => x + y, 0) / a.length : 0;
+      const firstK = meanOf(head);
+      const restMean = meanOf(rest);
+      const st = computeStats(v);
+      return {
+        id: g.id,
+        name: g.name,
+        n,
+        mean,
+        firstK,
+        restMean,
+        coldDelta: firstK - restMean,
+        tail3: n >= 3 ? meanOf(v.slice(-3)) : null,
+        hotDelta: hotGunDelta(v),
+        cv: st && st.mean !== 0 ? (st.std / Math.abs(st.mean)) * 100 : null,
+        startedAt: g.startedAt,
+      };
+    });
+}
+
+export interface OneSampleTest {
+  mean: number;
+  ciLow: number;
+  ciHigh: number;
+  p: number;
+  n: number;
+}
+
+/** 单样本 t 检验（用于"各组差值是否系统性偏离 0"，即热枪/冷枪效应是否真实存在） */
+export function oneSampleT(values: number[]): OneSampleTest | null {
+  const n = values.length;
+  if (n < 2) return null;
+  const mean = values.reduce((a, b) => a + b, 0) / n;
+  const sd = Math.sqrt(
+    values.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1)
+  );
+  const se = sd / Math.sqrt(n);
+  if (se === 0) return { mean, ciLow: mean, ciHigh: mean, p: mean === 0 ? 1 : 0, n };
+  const t = mean / se;
+  const crit = tCritical95(n - 1);
+  return {
+    mean,
+    ciLow: mean - crit * se,
+    ciHigh: mean + crit * se,
+    p: tTwoTailedP(t, n - 1),
+    n,
+  };
+}
+
+/**
+ * 按"组内第几发"对齐的平均偏离曲线：以各组自身均值为基准，
+ * 把每组的第 1、2、3… 发偏差叠加起来，用于看开机后头几发的系统性偏差。
+ */
+export function alignedProfile(
+  groups: Group[],
+  maxShots = 10
+): { shotIdx: number; meanDev: number; n: number; sd: number }[] {
+  const buckets: number[][] = Array.from({ length: maxShots }, () => []);
+  for (const g of groups) {
+    const v = g.shots.map((s) => s.speed_mps);
+    if (v.length === 0) continue;
+    const mean = v.reduce((a, b) => a + b, 0) / v.length;
+    v.slice(0, maxShots).forEach((x, i) => buckets[i].push(x - mean));
+  }
+  const out: { shotIdx: number; meanDev: number; n: number; sd: number }[] = [];
+  buckets.forEach((arr, i) => {
+    if (arr.length === 0) return;
+    const m = arr.reduce((a, b) => a + b, 0) / arr.length;
+    const sd =
+      arr.length > 1
+        ? Math.sqrt(arr.reduce((a, b) => a + (b - m) ** 2, 0) / (arr.length - 1))
+        : 0;
+    out.push({ shotIdx: i + 1, meanDev: m, n: arr.length, sd });
+  });
+  return out;
+}
+
+/** 组序 → 组均值的漂移趋势（正=越打到后面越慢/越快由符号决定） */
+export function driftTrend(
+  stats: CrossGroupStats[]
+): { slope: number; r: number; n: number } | null {
+  if (stats.length < 3) return null;
+  const xs = stats.map((_, i) => i + 1);
+  const ys = stats.map((s) => s.mean);
+  const c = correlate(xs, ys);
+  return c ? { slope: c.slope, r: c.r, n: c.n } : null;
+}
+
+/** 全部组的发按时间顺序拼成一条序列（跨组时间轴） */
+export function crossGroupSeries(
+  groups: Group[]
+): { groupIndex: number; groupName: string; shotIdx: number; speed: number; at: number }[] {
+  const ordered = [...groups].sort(
+    (a, b) => a.startedAt - b.startedAt || a.id - b.id
+  );
+  const out: {
+    groupIndex: number;
+    groupName: string;
+    shotIdx: number;
+    speed: number;
+    at: number;
+  }[] = [];
+  ordered.forEach((g, gi) => {
+    g.shots.forEach((s, si) => {
+      out.push({
+        groupIndex: gi,
+        groupName: g.name,
+        shotIdx: si + 1,
+        speed: s.speed_mps,
+        at: s.at_ms,
+      });
+    });
+  });
+  return out;
+}

@@ -3,8 +3,12 @@
  * 纯函数（除取当前时间），vitest 覆盖。
  */
 import {
+  alignedProfile,
   bootstrapDiff,
   correlate,
+  crossGroupStats,
+  driftTrend,
+  oneSampleT,
   dispersionGeometry,
   hotGunDelta,
   intervalStats,
@@ -345,10 +349,66 @@ export function buildOverviewMarkdown(input: ReportInput): string {
     L.push("");
   }
 
-  // 5. 两组对比
+  // 5. 多组（当日）汇总与热枪效应
+  const cg = crossGroupStats(groups, 3);
+  if (cg.length >= 2) {
+    L.push("## 五、多组汇总与热枪效应");
+    L.push("");
+    const cold = oneSampleT(cg.filter((s) => s.n > 3).map((s) => s.coldDelta));
+    const hot = oneSampleT(
+      cg.map((s) => s.hotDelta).filter((v): v is number => v !== null)
+    );
+    const drift = driftTrend(cg);
+    const prof = alignedProfile(groups, 6);
+    const desc = (t: ReturnType<typeof oneSampleT>) =>
+      t === null
+        ? "样本不足"
+        : `${t.mean >= 0 ? "+" : ""}${t.mean.toFixed(4)} m/s（95% CI ${t.ciLow.toFixed(
+            4
+          )} ~ ${t.ciHigh.toFixed(4)}，p=${t.p < 0.001 ? "<0.001" : t.p.toFixed(3)}，n=${t.n}）${
+            t.p < 0.05 ? " → 系统性偏差显著" : " → 不显著"
+          }`;
+    L.push(`- 冷枪效应（每组前 3 发 − 该组其余发）：${desc(cold)}`);
+    L.push(`- 组内热枪（每组后 3 发 − 前 3 发）：${desc(hot)}`);
+    if (drift) {
+      L.push(
+        `- 组间漂移：按测试顺序，组均值每前进一组变化 ${drift.slope >= 0 ? "+" : ""}${drift.slope.toFixed(
+          4
+        )} m/s（r=${drift.r.toFixed(2)}，n=${drift.n} 组）`
+      );
+    }
+    L.push("");
+    L.push("组名 | 发数 | 均值 | 前3发 | 其余发 | 冷枪差 | 组内热枪差 | CV%");
+    L.push("--- | --- | --- | --- | --- | --- | --- | ---");
+    for (const s of cg) {
+      L.push(
+        [
+          s.name,
+          String(s.n),
+          s.mean.toFixed(4),
+          s.firstK.toFixed(4),
+          s.restMean.toFixed(4),
+          `${s.coldDelta >= 0 ? "+" : ""}${s.coldDelta.toFixed(4)}`,
+          f(s.hotDelta, 4),
+          f(s.cv, 2),
+        ].join(" | ")
+      );
+    }
+    if (prof.length > 0) {
+      L.push("");
+      L.push("按组内发序号对齐的平均偏差（以各组自身均值为基准）：");
+      L.push("");
+      L.push(prof.map((p) => `第${p.shotIdx}发 ${p.meanDev >= 0 ? "+" : ""}${p.meanDev.toFixed(4)}`).join(" | "));
+      L.push("");
+      L.push("（各发偏差越大说明该位置系统性偏高/偏低，可用于判断热枪建立需要几发）");
+    }
+    L.push("");
+  }
+
+  // 6. 两组对比
   if (input.compare) {
     const [a, b] = input.compare;
-    L.push(`## 五、两组对比（${a.name} vs ${b.name}）`);
+    L.push(`## 六、两组对比（${a.name} vs ${b.name}）`);
     L.push("");
     L.push("指标 | " + a.name + " | " + b.name + " | 差值(B-A) | 95% CI | p");
     L.push("--- | --- | --- | --- | --- | ---");

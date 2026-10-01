@@ -131,7 +131,9 @@ describe("buildOverviewMarkdown", () => {
       compare: [groups[0], groups[2]],
       generatedAt: new Date("2026-10-02T10:00:00"),
     });
-    expect(md).toContain("## 五、两组对比（组A vs 组C）");
+    expect(md).toContain("## 五、多组汇总与热枪效应");
+    expect(md).toContain("## 六、两组对比（组A vs 组C）");
+    expect(md).toContain("冷枪效应");
     expect(md).toContain("95% CI");
     expect(md).toContain("Welch t 检验");
   });

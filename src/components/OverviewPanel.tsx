@@ -38,6 +38,7 @@ import {
   type GroupSummaryRow,
 } from "../analysis";
 import { saveCsv, saveText } from "../csv";
+import CrossGroupCard from "./CrossGroupCard";
 
 const TARGET_KEY = "rm-chrono-target-speed";
 
@@ -462,6 +463,8 @@ export default function OverviewPanel() {
             </Space>
           </Card>
         )}
+
+        <CrossGroupCard />
 
         <Card
           size="small"
