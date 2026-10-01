@@ -9,6 +9,7 @@ import {
   Popover,
   Segmented,
   Select,
+  Slider,
   Space,
   Switch,
   Tag,
@@ -16,6 +17,7 @@ import {
 } from "antd";
 import {
   AimOutlined,
+  BulbOutlined,
   ClearOutlined,
   DownloadOutlined,
   EditOutlined,
@@ -42,6 +44,16 @@ import {
   score,
 } from "../dispersion/math";
 import type { Pt } from "../dispersion/math";
+import {
+  applyHighPass,
+  DEFAULT_ENHANCE,
+  isNoopEnhance,
+  localBlurRadius,
+  PRESET_HITS,
+  replicateChannel,
+  SHARP_BLUR_RADIUS,
+  type EnhanceParams,
+} from "../dispersion/enhance";
 import { useAppStore } from "../store";
 import CropModal from "./CropModal";
 import type { PaperSpec } from "./CropModal";
@@ -64,6 +76,101 @@ function compressImage(
   if (!ctx) return image.src;
   ctx.drawImage(image, 0, 0, cw, ch);
   return c.toDataURL("image/jpeg", quality);
+}
+
+/** 增强面板里的单行滑块 */
+function EnhanceRow(props: {
+  label: string;
+  hint?: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div
+        style={{
+          fontSize: 12,
+          color: "#666",
+          display: "flex",
+          justifyContent: "space-between",
+          lineHeight: "18px",
+        }}
+      >
+        <Tooltip title={props.hint}>
+          <span>{props.label}</span>
+        </Tooltip>
+        <span style={{ fontVariantNumeric: "tabular-nums" }}>
+          {props.value.toFixed(2)}
+        </span>
+      </div>
+      <Slider
+        min={props.min}
+        max={props.max}
+        step={props.step}
+        value={props.value}
+        onChange={props.onChange}
+        style={{ margin: "2px 0 0" }}
+      />
+    </div>
+  );
+}
+
+/**
+ * 生成增强后的离屏画布（与原图同尺寸，保证标点坐标一一对应）。
+ * 亮度/对比度/灰度/反相用 canvas filter 交给 GPU；
+ * 局部对比与锐化用"模糊作低频 + 高频提升"，把浅色印记从纸面里拉出来。
+ */
+function buildEnhanced(
+  image: HTMLImageElement,
+  p: EnhanceParams
+): HTMLCanvasElement | null {
+  const w = image.naturalWidth;
+  const h = image.naturalHeight;
+  if (w === 0 || h === 0) return null;
+  const base = document.createElement("canvas");
+  base.width = w;
+  base.height = h;
+  const ctx = base.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return null;
+
+  const filters: string[] = [];
+  if (p.brightness !== 1) filters.push(`brightness(${p.brightness})`);
+  if (p.contrast !== 1) filters.push(`contrast(${p.contrast})`);
+  if (p.gray) filters.push("grayscale(1)");
+  if (p.invert) filters.push("invert(1)");
+  ctx.filter = filters.length > 0 ? filters.join(" ") : "none";
+  ctx.drawImage(image, 0, 0);
+  ctx.filter = "none";
+
+  if (p.local > 0 || p.sharpen > 0) {
+    const blurredData = (radius: number): Uint8ClampedArray => {
+      const c = document.createElement("canvas");
+      c.width = w;
+      c.height = h;
+      const cx = c.getContext("2d")!;
+      cx.filter = `blur(${radius}px)`;
+      cx.drawImage(base, 0, 0);
+      return cx.getImageData(0, 0, w, h).data;
+    };
+    const imgData = ctx.getImageData(0, 0, w, h);
+    const lowLocal = p.local > 0 ? blurredData(localBlurRadius(w, h)) : null;
+    const lowSharp = p.sharpen > 0 ? blurredData(SHARP_BLUR_RADIUS) : null;
+    // 灰度图只需处理 R 通道，省 2/3 时间；随后把 R 复制到 G/B 避免偏色
+    applyHighPass(
+      imgData.data,
+      lowLocal,
+      lowSharp,
+      p.local,
+      p.sharpen,
+      p.gray ? 1 : 3
+    );
+    if (p.gray) replicateChannel(imgData.data, 0);
+    ctx.putImageData(imgData, 0, 0);
+  }
+  return base;
 }
 
 export const PAPER_SIZES: PaperSpec[] = [
@@ -102,10 +209,18 @@ const COLORS = {
   mec: "#0050ff",
 };
 
+/** 绘制源：原图或增强后的离屏画布 */
+type ImgSource = HTMLImageElement | HTMLCanvasElement;
+
+/** 绘制源像素宽度（画布与图片的宽度取法不同） */
+function srcWidth(s: ImgSource): number {
+  return s instanceof HTMLCanvasElement ? s.width : s.naturalWidth;
+}
+
 /** 场景绘制：图像 + 弹孔 + （可选）分析叠加 + 文字（图像像素坐标系） */
 function drawScene(
   ctx: CanvasRenderingContext2D,
-  img: HTMLImageElement,
+  img: ImgSource,
   points: Pt[],
   texts: TextMark[],
   analysis: Analysis | null,
@@ -113,7 +228,7 @@ function drawScene(
   showOverlay: boolean
 ) {
   ctx.drawImage(img, 0, 0);
-  const fontPx = Math.max(12, Math.round(img.naturalWidth / 60));
+  const fontPx = Math.max(12, Math.round(srcWidth(img) / 60));
 
   // 弹孔点（始终绘制）+ 环数标注（仅叠加层开启时）
   for (const p of points) {
@@ -262,6 +377,7 @@ export default function DispersionPanel(props: { onBack: () => void }) {
   const [showOverlay, setShowOverlay] = useState(false);
   const [placingText, setPlacingText] = useState(false);
   const [textPopOpen, setTextPopOpen] = useState(false);
+  const [enhanceOpen, setEnhanceOpen] = useState(false);
   const [textInput, setTextInput] = useState("");
   const [textSize, setTextSize] = useState(18);
   const [textColor, setTextColor] = useState("#ff3b3b");
@@ -287,12 +403,20 @@ export default function DispersionPanel(props: { onBack: () => void }) {
   const [imgNatural, setImgNatural] = useState<
     { w: number; h: number } | undefined
   >(undefined);
+  /** 图像增强参数（随组保存） */
+  const [enhance, setEnhance] = useState<EnhanceParams>({ ...DEFAULT_ENHANCE });
+  /** 增强后的离屏画布（原图尺寸），未启用/处理中为 null */
+  const [enhanced, setEnhanced] = useState<HTMLCanvasElement | null>(null);
+  const [enhancing, setEnhancing] = useState(false);
   /** 正在从组数据载入，避免载入过程反过来触发写回 */
   const loadingRef = useRef(false);
+  /** 该组是否已完成一次数据同步（同步后的首个提交不回写，避免用初始空状态覆盖组数据） */
+  const readyRef = useRef(false);
 
   // 组切换：把该组已存的散布数据载入到面板
   useEffect(() => {
     loadingRef.current = true;
+    readyRef.current = false;
     const d = group?.dispersion;
     setPoints(d ? d.points.map((p) => ({ ...p })) : []);
     setTexts(d ? d.texts.map((t) => ({ ...t })) : []);
@@ -304,6 +428,7 @@ export default function DispersionPanel(props: { onBack: () => void }) {
     }
     setImgDataUrl(d?.imageDataUrl);
     setImgNatural(d?.imgW && d.imgH ? { w: d.imgW, h: d.imgH } : undefined);
+    setEnhance(d?.enhance ? { ...DEFAULT_ENHANCE, ...d.enhance } : { ...DEFAULT_ENHANCE });
     if (d?.imageDataUrl) {
       const image = new Image();
       image.onload = () => {
@@ -324,9 +449,42 @@ export default function DispersionPanel(props: { onBack: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupId]);
 
+  // 同步完成的提交可能是"初始状态"那一帧，等下一帧再允许回写
+  useEffect(() => {
+    if (!readyRef.current) {
+      const t = window.setTimeout(() => {
+        readyRef.current = true;
+      }, 0);
+      return () => clearTimeout(t);
+    }
+  }, [points, texts, enhance, imgDataUrl]);
+
+  // 图像增强：参数或原图变化后重建离屏画布（300ms 去抖，处理时给出提示）
+  useEffect(() => {
+    if (!img || isNoopEnhance(enhance)) {
+      setEnhanced(null);
+      setEnhancing(false);
+      return;
+    }
+    setEnhancing(true);
+    const timer = window.setTimeout(() => {
+      try {
+        setEnhanced(buildEnhanced(img, enhance));
+      } catch {
+        setEnhanced(null);
+      } finally {
+        setEnhancing(false);
+      }
+    }, 300);
+    return () => {
+      clearTimeout(timer);
+      setEnhancing(false);
+    };
+  }, [img, enhance]);
+
   // 任何编辑都写回当前组（300ms 去抖）
   useEffect(() => {
-    if (!groupId || loadingRef.current) return;
+    if (!groupId || loadingRef.current || !readyRef.current) return;
     const t = window.setTimeout(() => {
       const cur = useAppStore
         .getState()
@@ -345,12 +503,13 @@ export default function DispersionPanel(props: { onBack: () => void }) {
               texts,
               imgW: imgNatural?.w,
               imgH: imgNatural?.h,
+              enhance: { ...enhance },
               updatedAt: Date.now(),
             }
       );
     }, 300);
     return () => clearTimeout(t);
-  }, [groupId, imgNatural, imgDataUrl, effSpec, points, texts, setGroupDispersion]);
+  }, [groupId, imgNatural, imgDataUrl, effSpec, points, texts, enhance, setGroupDispersion]);
 
   const natural = img
     ? { w: img.naturalWidth, h: img.naturalHeight }
@@ -423,8 +582,8 @@ export default function DispersionPanel(props: { onBack: () => void }) {
     if (!ctx) return;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, natural.w, natural.h);
-    drawScene(ctx, img, points, texts, analysis, mmPerPx, showOverlay);
-  }, [img, points, texts, analysis, natural.w, natural.h, mmPerPx, showOverlay]);
+    drawScene(ctx, enhanced ?? img, points, texts, analysis, mmPerPx, showOverlay);
+  }, [img, enhanced, points, texts, analysis, natural.w, natural.h, mmPerPx, showOverlay]);
 
   const loadFile = (file: File) => {
     const reader = new FileReader();
@@ -480,7 +639,7 @@ export default function DispersionPanel(props: { onBack: () => void }) {
       off.width = natural.w;
       off.height = natural.h;
       const ctx = off.getContext("2d")!;
-      drawScene(ctx, img, points, texts, analysis, mmPerPx, showOverlay);
+      drawScene(ctx, enhanced ?? img, points, texts, analysis, mmPerPx, showOverlay);
       const dataUrl = off.toDataURL("image/png");
       const base64 = dataUrl.split(",")[1];
       const path = await save({
@@ -531,6 +690,106 @@ export default function DispersionPanel(props: { onBack: () => void }) {
       setExporting(false);
     }
   };
+
+  const enhanceControls = (
+    <div style={{ width: 272 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          marginBottom: 10,
+        }}
+      >
+        <Switch
+          size="small"
+          checked={enhance.on}
+          onChange={(v) => setEnhance((e) => ({ ...e, on: v }))}
+        />
+        <span style={{ fontSize: 12 }}>启用增强（不影响原图与标定）</span>
+      </div>
+      <EnhanceRow
+        label="亮度"
+        value={enhance.brightness}
+        min={0.5}
+        max={1.5}
+        step={0.01}
+        onChange={(v) => setEnhance((e) => ({ ...e, brightness: v }))}
+      />
+      <EnhanceRow
+        label="对比度"
+        value={enhance.contrast}
+        min={0.5}
+        max={3}
+        step={0.05}
+        onChange={(v) => setEnhance((e) => ({ ...e, contrast: v }))}
+      />
+      <EnhanceRow
+        label="局部对比"
+        hint="把浅色落点从纸面纹理里拉出来"
+        value={enhance.local}
+        min={0}
+        max={3}
+        step={0.1}
+        onChange={(v) => setEnhance((e) => ({ ...e, local: v }))}
+      />
+      <EnhanceRow
+        label="锐化"
+        value={enhance.sharpen}
+        min={0}
+        max={2}
+        step={0.1}
+        onChange={(v) => setEnhance((e) => ({ ...e, sharpen: v }))}
+      />
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 16,
+          margin: "6px 0 10px",
+        }}
+      >
+        <label
+          style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}
+        >
+          灰度
+          <Switch
+            size="small"
+            checked={enhance.gray}
+            onChange={(v) => setEnhance((e) => ({ ...e, gray: v }))}
+          />
+        </label>
+        <label
+          style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}
+        >
+          反相
+          <Switch
+            size="small"
+            checked={enhance.invert}
+            onChange={(v) => setEnhance((e) => ({ ...e, invert: v }))}
+          />
+        </label>
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <Button
+          size="small"
+          type="primary"
+          onClick={() => setEnhance({ ...PRESET_HITS })}
+        >
+          落点增强
+        </Button>
+        <Button
+          size="small"
+          onClick={() => setEnhance({ ...DEFAULT_ENHANCE, on: true })}
+        >
+          重置
+        </Button>
+      </div>
+      <div style={{ fontSize: 11, color: "#999", marginTop: 8, lineHeight: 1.5 }}>
+        「局部对比」是让浅色落点变明显的关键；纸面纹理较重时调低它、提高「对比度」。
+      </div>
+    </div>
+  );
 
   const textControls = (
     <div style={{ width: 210 }}>
@@ -601,6 +860,11 @@ export default function DispersionPanel(props: { onBack: () => void }) {
                 : `未裁剪：按整图 ${effSpec.name} ${effSpec.w}×${effSpec.h}mm 标定`}
             </Tag>
           )}
+          {enhancing ? (
+            <Tag color="processing">增强处理中…</Tag>
+          ) : (
+            enhanced && <Tag color="geekblue">增强已应用</Tag>
+          )}
         </Space>
       }
       style={{ height: "100%", display: "flex", flexDirection: "column" }}
@@ -645,6 +909,25 @@ export default function DispersionPanel(props: { onBack: () => void }) {
         >
           裁剪标定
         </Button>
+        <Popover
+          content={enhanceControls}
+          trigger="click"
+          placement="bottomLeft"
+          open={enhanceOpen}
+          onOpenChange={setEnhanceOpen}
+        >
+          <Tooltip title="图像增强：把白纸上的浅色弹着印记调明显">
+            <Button
+              size="small"
+              icon={<BulbOutlined />}
+              disabled={!img}
+              type={enhance.on ? "primary" : "default"}
+              loading={enhancing}
+            >
+              图像增强
+            </Button>
+          </Tooltip>
+        </Popover>
         <Divider type="vertical" />
         <Tooltip title="撤销点">
           <Button

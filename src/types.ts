@@ -44,6 +44,16 @@ export interface DispersionData {
   /** 靶纸图片原始像素尺寸（px→mm 换算用） */
   imgW?: number;
   imgH?: number;
+  /** 图像增强参数（非破坏性，原图不变） */
+  enhance?: {
+    on: boolean;
+    brightness: number;
+    contrast: number;
+    local: number;
+    sharpen: number;
+    gray: boolean;
+    invert: boolean;
+  };
   /** 更新时间 */
   updatedAt: number;
 }

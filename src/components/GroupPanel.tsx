@@ -239,6 +239,73 @@ export default function GroupPanel() {
         </div>
       )}
 
+      {/* 工具栏：无数据时也要能导入项目 */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          margin: "2px 0 6px",
+        }}
+      >
+        <span style={{ fontSize: 12, color: "#999" }}>测试记录</span>
+        <Space size={2}>
+          <Tooltip title="导入项目文件（.rmtest）">
+            <Button
+              size="small"
+              type="text"
+              icon={<ImportOutlined />}
+              loading={ioBusy}
+              onClick={handleImportProject}
+            />
+          </Tooltip>
+          <Tooltip title="导出项目文件（含全部组与波形）">
+            <Button
+              size="small"
+              type="text"
+              icon={<ExportOutlined />}
+              disabled={groups.length === 0}
+              loading={ioBusy}
+              onClick={handleExportProject}
+            />
+          </Tooltip>
+          <Popconfirm
+            title="清理全部波形快照？"
+            description="仅删除掉速曲线数据，弹速指标与分组参数保留"
+            okText="清理"
+            cancelText="取消"
+            onConfirm={() => {
+              clearWaveforms();
+              message.success("已清理波形快照");
+            }}
+            disabled={waveShotCount === 0}
+          >
+            <Tooltip title={`清理历史波形（当前 ${waveShotCount} 发有波形）`}>
+              <Button
+                size="small"
+                type="text"
+                icon={<ThunderboltOutlined />}
+                disabled={waveShotCount === 0}
+              />
+            </Tooltip>
+          </Popconfirm>
+        </Space>
+      </div>
+      {compareIds.length > 0 && (
+        <div style={{ marginBottom: 6 }}>
+          <Button
+            type="primary"
+            size="small"
+            block
+            icon={<FundOutlined />}
+            disabled={compareIds.length !== 2}
+            onClick={() => setCompareOpen(true)}
+          >
+            {compareIds.length === 2 ? "一键对比两组" : "再勾选一组进行对比"}
+          </Button>
+        </div>
+      )}
+
       {/* 组列表 */}
       {groups.length === 0 ? (
         <div
@@ -264,73 +331,6 @@ export default function GroupPanel() {
         </div>
       ) : (
         <>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              margin: "2px 0 6px",
-            }}
-          >
-            <span style={{ fontSize: 12, color: "#999" }}>测试记录</span>
-            <Space size={2}>
-              <Tooltip title="导入项目文件（.rmtest）">
-                <Button
-                  size="small"
-                  type="text"
-                  icon={<ImportOutlined />}
-                  loading={ioBusy}
-                  onClick={handleImportProject}
-                />
-              </Tooltip>
-              <Tooltip title="导出项目文件（含全部组与波形）">
-                <Button
-                  size="small"
-                  type="text"
-                  icon={<ExportOutlined />}
-                  disabled={groups.length === 0}
-                  loading={ioBusy}
-                  onClick={handleExportProject}
-                />
-              </Tooltip>
-              <Popconfirm
-                title="清理全部波形快照？"
-                description="仅删除掉速曲线数据，弹速指标与分组参数保留"
-                okText="清理"
-                cancelText="取消"
-                onConfirm={() => {
-                  clearWaveforms();
-                  message.success("已清理波形快照");
-                }}
-                disabled={waveShotCount === 0}
-              >
-                <Tooltip title={`清理历史波形（当前 ${waveShotCount} 发有波形）`}>
-                  <Button
-                    size="small"
-                    type="text"
-                    icon={<ThunderboltOutlined />}
-                    disabled={waveShotCount === 0}
-                  />
-                </Tooltip>
-              </Popconfirm>
-            </Space>
-          </div>
-          {compareIds.length > 0 && (
-            <div style={{ marginBottom: 6 }}>
-              <Button
-                type="primary"
-                size="small"
-                block
-                icon={<FundOutlined />}
-                disabled={compareIds.length !== 2}
-                onClick={() => setCompareOpen(true)}
-              >
-                {compareIds.length === 2
-                  ? "一键对比两组"
-                  : "再勾选一组进行对比"}
-              </Button>
-            </div>
-          )}
           <div
             style={{
               display: "flex",
