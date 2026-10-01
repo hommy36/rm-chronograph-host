@@ -152,7 +152,10 @@ export default function ShotWaveModal(props: {
         };
       });
     return {
-      animation: false,
+      animation: true,
+      animationDuration: 300,
+      animationDurationUpdate: 250,
+      animationEasingUpdate: "cubicOut",
       grid: { left: 70, right: 46, top: 46, bottom: 60 },
       legend: { type: "scroll", top: 4, textStyle: { fontSize: 11 } },
       tooltip: { trigger: "axis", valueFormatter: (v) => Number(v).toFixed(1) },
@@ -248,9 +251,9 @@ export default function ShotWaveModal(props: {
         </Space>
       }
       width="80%"
-      style={{ top: 24 }}
+      centered
       styles={{
-        body: { maxHeight: "calc(100vh - 200px)", overflowY: "auto", paddingRight: 8 },
+        body: { maxHeight: "calc(100vh - 180px)", overflowY: "auto", paddingRight: 8 },
       }}
     >
       {!wave ? (

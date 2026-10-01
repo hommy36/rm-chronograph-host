@@ -82,7 +82,10 @@ export default function ChartsGrid() {
       },
     ];
     return {
-      animation: false,
+      animation: true,
+      animationDuration: 300,
+      animationDurationUpdate: 250,
+      animationEasingUpdate: "cubicOut",
       title: { text: "时间序列图", top: 2, textStyle: titleStyle },
       grid: baseGrid,
       tooltip: { trigger: "axis", valueFormatter: (v) => Number(v).toFixed(3) },
@@ -108,7 +111,10 @@ export default function ChartsGrid() {
       });
     }
     return {
-      animation: false,
+      animation: true,
+      animationDuration: 300,
+      animationDurationUpdate: 250,
+      animationEasingUpdate: "cubicOut",
       title: { text: "数据分布直方图", top: 2, textStyle: titleStyle },
       grid: baseGrid,
       tooltip: { trigger: "axis" },
@@ -141,7 +147,10 @@ export default function ChartsGrid() {
   const deviationOption = useMemo<EChartsOption>(() => {
     const devs = stats ? deviations(speeds, stats.mean) : [];
     return {
-      animation: false,
+      animation: true,
+      animationDuration: 300,
+      animationDurationUpdate: 250,
+      animationEasingUpdate: "cubicOut",
       title: { text: "数据变化趋势图", top: 2, textStyle: titleStyle },
       grid: baseGrid,
       tooltip: { trigger: "axis", valueFormatter: (v) => Number(v).toFixed(4) },
@@ -172,7 +181,10 @@ export default function ChartsGrid() {
       u !== null && lower[i] !== null ? u - (lower[i] as number) : null
     );
     return {
-      animation: false,
+      animation: true,
+      animationDuration: 300,
+      animationDurationUpdate: 250,
+      animationEasingUpdate: "cubicOut",
       title: {
         text: "移动平均图",
         subtext: `总方差: ${stats ? stats.variance.toFixed(6) : "--"}`,

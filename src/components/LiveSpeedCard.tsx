@@ -30,7 +30,9 @@ export default function LiveSpeedCard() {
             color,
           }}
         >
-          {latest ? latest.speed_mps.toFixed(3) : "--.---"}
+          <span key={latest?.at_ms ?? 0} className="speed-pop">
+            {latest ? latest.speed_mps.toFixed(3) : "--.---"}
+          </span>
           <span style={{ fontSize: 18, fontWeight: 400, marginLeft: 6 }}>
             m/s
           </span>

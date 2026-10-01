@@ -65,3 +65,38 @@ body {
 .ant-statistic-title {
   white-space: nowrap;
 }
+
+/* 新数据动画：大弹速数字每次刷新轻微弹一下 */
+@keyframes speed-pop {
+  0% {
+    transform: scale(0.94);
+    opacity: 0.55;
+  }
+  60% {
+    transform: scale(1.015);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.speed-pop {
+  display: inline-block;
+  animation: speed-pop 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 新数据动画：明细表最新一行闪现高亮 */
+@keyframes row-flash {
+  from {
+    background-color: #d6e9ff;
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
+.shot-row-new > td {
+  animation: row-flash 1.4s ease-out;
+}

@@ -65,7 +65,10 @@ export default function CompareModal(props: {
     const da = pick(a);
     const db = pick(b);
     return {
-      animation: false,
+      animation: true,
+      animationDuration: 300,
+      animationDurationUpdate: 250,
+      animationEasingUpdate: "cubicOut",
       grid: { left: 60, right: 24, top: 44, bottom: 46 },
       legend: { top: 4, textStyle: { fontSize: 11 } },
       tooltip: { trigger: "axis" },
@@ -85,7 +88,10 @@ export default function CompareModal(props: {
       b.shots.map((s) => s.speed_mps)
     );
     return {
-      animation: false,
+      animation: true,
+      animationDuration: 300,
+      animationDurationUpdate: 250,
+      animationEasingUpdate: "cubicOut",
       grid: { left: 56, right: 24, top: 44, bottom: 46 },
       legend: { top: 4, textStyle: { fontSize: 11 } },
       tooltip: { trigger: "axis" },
@@ -155,9 +161,9 @@ export default function CompareModal(props: {
       open={props.open}
       onCancel={props.onClose}
       width="88%"
-      style={{ top: 24 }}
+      centered
       styles={{
-        body: { maxHeight: "calc(100vh - 200px)", overflowY: "auto", paddingRight: 8 },
+        body: { maxHeight: "calc(100vh - 180px)", overflowY: "auto", paddingRight: 8 },
       }}
       footer={
         <Space style={{ width: "100%", justifyContent: "space-between" }}>

@@ -97,12 +97,16 @@ export default function ShotsTable() {
         dataSource={group ? [...group.shots].reverse() : []}
         pagination={false}
         sticky
-        onRow={(shot) => ({
-          onClick: () => {
-            if (shot.wave) setWaveShotIdx(shot.idx);
-          },
-          style: shot.wave ? { cursor: "pointer" } : undefined,
-        })}
+        onRow={(shot) => {
+          const isNewest = group ? shot.idx === group.shots.length : false;
+          return {
+            className: isNewest ? "shot-row-new" : undefined,
+            onClick: () => {
+              if (shot.wave) setWaveShotIdx(shot.idx);
+            },
+            style: shot.wave ? { cursor: "pointer" } : undefined,
+          };
+        }}
         columns={[
           { title: "序号", dataIndex: "idx", width: 80 },
           {
