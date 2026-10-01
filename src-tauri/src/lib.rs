@@ -262,6 +262,30 @@ fn write_text_file(path: String, contents: String) -> Result<(), String> {
     std::fs::write(&path, contents).map_err(|e| format!("写入 {path} 失败：{e}"))
 }
 
+/// 读取文本文件（载入会话 / 导入项目）
+#[tauri::command]
+fn read_text_file(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path).map_err(|e| format!("读取 {path} 失败：{e}"))
+}
+
+/// 会话文件绝对路径（自动创建应用数据目录）
+#[tauri::command]
+fn session_file_path(app: AppHandle) -> Result<String, String> {
+    use tauri::Manager;
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用数据目录失败：{e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建目录失败：{e}"))?;
+    Ok(dir.join("session.json").to_string_lossy().to_string())
+}
+
+/// 会话文件是否存在
+#[tauri::command]
+fn session_file_exists(path: String) -> bool {
+    std::path::Path::new(&path).is_file()
+}
+
 /// 导出二进制文件（如标注图 PNG）：base64 解码后写盘
 #[tauri::command]
 fn write_binary_file(path: String, base64_data: String) -> Result<(), String> {
@@ -286,7 +310,10 @@ pub fn run() {
             connect_wave_serial,
             disconnect_wave_serial,
             write_text_file,
-            write_binary_file
+            write_binary_file,
+            read_text_file,
+            session_file_path,
+            session_file_exists
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

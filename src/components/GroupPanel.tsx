@@ -4,6 +4,7 @@ import {
   Badge,
   Button,
   Card,
+  Checkbox,
   Input,
   InputNumber,
   message,
@@ -16,13 +17,19 @@ import {
   CheckCircleFilled,
   DeleteOutlined,
   ExperimentOutlined,
+  ExportOutlined,
+  FundOutlined,
+  ImportOutlined,
   InboxOutlined,
   PlusOutlined,
   StopOutlined,
+  ThunderboltOutlined,
 } from "@ant-design/icons";
 import { useAppStore } from "../store";
 import type { GroupParams } from "../types";
 import { EMPTY_PARAMS } from "../types";
+import { exportProject, importProject } from "../sessionIO";
+import CompareModal from "./CompareModal";
 
 const FIELDS: {
   key: keyof GroupParams;
@@ -57,14 +64,58 @@ export default function GroupPanel() {
   const setTargetShots = useAppStore((s) => s.setTargetShots);
 
   const [params, setParams] = useState<GroupParams>({ ...EMPTY_PARAMS });
+  const compareIds = useAppStore((s) => s.compareIds);
+  const toggleCompare = useAppStore((s) => s.toggleCompare);
+  const clearWaveforms = useAppStore((s) => s.clearWaveforms);
+  const [compareOpen, setCompareOpen] = useState(false);
+  const [ioBusy, setIoBusy] = useState(false);
 
   const activeGroup = groups.find((g) => g.id === activeGroupId) ?? null;
   const shotCount = activeGroup?.shots.length ?? 0;
   const reached = shotCount >= targetShots;
+  const waveShotCount = groups.reduce(
+    (n, g) => n + g.shots.filter((s) => s.wave).length,
+    0
+  );
 
   const handleStart = () => {
     startGroup({ ...params });
     message.success("已开始新组，测速帧将计入该组");
+  };
+
+  const handleExportProject = async () => {
+    setIoBusy(true);
+    try {
+      const s = useAppStore.getState();
+      const ok = await exportProject(
+        {
+          groups: s.groups,
+          nextGroupId: s.nextGroupId,
+          targetShots: s.targetShots,
+          waveConfig: s.waveConfig,
+        },
+        `测速项目_${new Date().toISOString().slice(0, 10)}.rmtest`
+      );
+      if (ok) message.success("项目已导出");
+    } catch (e) {
+      message.error(`导出失败：${e}`);
+    } finally {
+      setIoBusy(false);
+    }
+  };
+
+  const handleImportProject = async () => {
+    setIoBusy(true);
+    try {
+      const data = await importProject();
+      if (!data) return;
+      useAppStore.getState().hydrate({ ...data, merge: true });
+      message.success(`已导入 ${data.groups.length} 组数据`);
+    } catch (e) {
+      message.error(`导入失败：${e}`);
+    } finally {
+      setIoBusy(false);
+    }
   };
 
   return (
@@ -211,9 +262,73 @@ export default function GroupPanel() {
         </div>
       ) : (
         <>
-          <div style={{ fontSize: 12, color: "#999", margin: "2px 0 6px" }}>
-            测试记录
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              margin: "2px 0 6px",
+            }}
+          >
+            <span style={{ fontSize: 12, color: "#999" }}>测试记录</span>
+            <Space size={2}>
+              <Tooltip title="导入项目文件（.rmtest）">
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<ImportOutlined />}
+                  loading={ioBusy}
+                  onClick={handleImportProject}
+                />
+              </Tooltip>
+              <Tooltip title="导出项目文件（含全部组与波形）">
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<ExportOutlined />}
+                  disabled={groups.length === 0}
+                  loading={ioBusy}
+                  onClick={handleExportProject}
+                />
+              </Tooltip>
+              <Popconfirm
+                title="清理全部波形快照？"
+                description="仅删除掉速曲线数据，弹速指标与分组参数保留"
+                okText="清理"
+                cancelText="取消"
+                onConfirm={() => {
+                  clearWaveforms();
+                  message.success("已清理波形快照");
+                }}
+                disabled={waveShotCount === 0}
+              >
+                <Tooltip title={`清理历史波形（当前 ${waveShotCount} 发有波形）`}>
+                  <Button
+                    size="small"
+                    type="text"
+                    icon={<ThunderboltOutlined />}
+                    disabled={waveShotCount === 0}
+                  />
+                </Tooltip>
+              </Popconfirm>
+            </Space>
           </div>
+          {compareIds.length > 0 && (
+            <div style={{ marginBottom: 6 }}>
+              <Button
+                type="primary"
+                size="small"
+                block
+                icon={<FundOutlined />}
+                disabled={compareIds.length !== 2}
+                onClick={() => setCompareOpen(true)}
+              >
+                {compareIds.length === 2
+                  ? "一键对比两组"
+                  : "再勾选一组进行对比"}
+              </Button>
+            </div>
+          )}
           <div
             style={{
               display: "flex",
@@ -258,8 +373,29 @@ export default function GroupPanel() {
                     transition: "background 0.2s",
                   }}
                 >
-                  <span style={{ fontWeight: 500 }}>
-                    {g.name}
+                  <span
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      fontWeight: 500,
+                      minWidth: 0,
+                    }}
+                  >
+                    <Checkbox
+                      checked={compareIds.includes(g.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={() => toggleCompare(g.id)}
+                    />
+                    <span
+                      style={{
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {g.name}
+                    </span>
                     {g.id === activeGroupId && (
                       <Badge
                         status="processing"
@@ -268,11 +404,10 @@ export default function GroupPanel() {
                             记录中
                           </span>
                         }
-                        style={{ marginLeft: 8 }}
                       />
                     )}
                   </span>
-                  <span style={{ color: "#999", fontSize: 12 }}>
+                  <span style={{ color: "#999", fontSize: 12, flexShrink: 0 }}>
                     {g.shots.length} 发
                   </span>
                 </div>
@@ -281,6 +416,7 @@ export default function GroupPanel() {
           </div>
         </>
       )}
+      <CompareModal open={compareOpen} onClose={() => setCompareOpen(false)} />
     </Card>
   );
 }

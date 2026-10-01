@@ -55,3 +55,16 @@ export async function writeBinaryFile(
 ): Promise<void> {
   return invoke("write_binary_file", { path, base64Data });
 }
+
+export async function readTextFile(path: string): Promise<string> {
+  return invoke("read_text_file", { path });
+}
+
+/** 会话文件路径（Rust 侧会确保应用数据目录存在） */
+export async function sessionFilePath(): Promise<string> {
+  return invoke("session_file_path");
+}
+
+export async function sessionFileExists(path: string): Promise<boolean> {
+  return invoke("session_file_exists", { path });
+}

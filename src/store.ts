@@ -3,6 +3,7 @@ import type { Group, GroupParams, Shot, SpeedFrameMsg, WaveConfig } from "./type
 import { EMPTY_PARAMS, EMPTY_WAVE_CONFIG } from "./types";
 import { JustFloatParser } from "./justfloat";
 import { SNAP_POST_MS, takeSnapshot, WaveBuffer } from "./wave";
+import { mergeImported } from "./persist";
 
 /** 连续 500 ms 无有效心跳/数据帧判离线（协议 §3） */
 export const OFFLINE_TIMEOUT_MS = 500;
@@ -64,6 +65,8 @@ interface AppState {
   nextGroupId: number;
   /** 目标发数：仅用于进度显示与达标提醒，不写入导出文件 */
   targetShots: number;
+  /** 勾选用于对比的组 id（最多 2 个） */
+  compareIds: number[];
 
   /** 波形口（VOFA+ JustFloat）连接状态 */
   waveConnected: boolean;
@@ -91,6 +94,19 @@ interface AppState {
   /** 喂入波形口原始字节（真实串口事件 / 模拟器共用） */
   onWaveBytes: (atMs: number, bytes: ArrayLike<number>) => void;
   setWaveConfig: (cfg: WaveConfig) => void;
+  /** 勾选/取消勾选对比组（最多 2 个，超出时挤掉最早的） */
+  toggleCompare: (groupId: number) => void;
+  clearCompare: () => void;
+  /** 从持久化数据恢复（启动载入 / 导入合并） */
+  hydrate: (data: {
+    groups: Group[];
+    nextGroupId: number;
+    targetShots: number;
+    waveConfig: WaveConfig;
+    merge?: boolean;
+  }) => void;
+  /** 清理历史波形快照（保留指标可导出的弹速数据），释放磁盘/内存 */
+  clearWaveforms: () => void;
 }
 
 function makeGroup(id: number, name: string, params: GroupParams): Group {
@@ -110,6 +126,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   viewingGroupId: null,
   nextGroupId: 1,
   targetShots: DEFAULT_TARGET_SHOTS,
+  compareIds: [],
   waveConnected: false,
   wavePortName: null,
   waveChannelCount: 0,
@@ -303,4 +320,45 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     set({ waveConfig: cfg });
   },
+
+  toggleCompare: (groupId) =>
+    set((s) => {
+      if (s.compareIds.includes(groupId)) {
+        return { compareIds: s.compareIds.filter((id) => id !== groupId) };
+      }
+      const next = [...s.compareIds, groupId];
+      return { compareIds: next.slice(-2) };
+    }),
+
+  clearCompare: () => set({ compareIds: [] }),
+
+  hydrate: (data) =>
+    set((s) => {
+      if (!data.merge) {
+        return {
+          groups: data.groups,
+          nextGroupId: data.nextGroupId,
+          targetShots: data.targetShots,
+          waveConfig: data.waveConfig,
+          viewingGroupId: data.groups.length > 0 ? data.groups[0].id : null,
+          activeGroupId: null,
+          compareIds: [],
+        };
+      }
+      const merged = mergeImported(s.groups, data.groups, s.nextGroupId);
+      return {
+        groups: merged.groups,
+        nextGroupId: merged.nextGroupId,
+      };
+    }),
+
+  clearWaveforms: () =>
+    set((s) => ({
+      groups: s.groups.map((g) => ({
+        ...g,
+        shots: g.shots.map((shot) =>
+          shot.wave ? { ...shot, wave: undefined } : shot
+        ),
+      })),
+    })),
 }));

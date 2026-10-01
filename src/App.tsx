@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { Layout } from "antd";
+import { Layout, message } from "antd";
 import { listen } from "@tauri-apps/api/event";
 import { isTauri, b64ToBytes } from "./api";
 import { useAppStore } from "./store";
+import { loadSession, saveSession } from "./sessionIO";
 import { Simulator } from "./simulator";
 import type { SpeedFrameMsg } from "./types";
 import ConnectionBar from "./components/ConnectionBar";
@@ -57,9 +58,75 @@ function useOfflineWatchdog() {
   }, []);
 }
 
+/** 会话持久化：启动载入历史数据 + 变更后去抖 2s 自动落盘 */
+function useSessionPersistence() {
+  const [loadedInfo, setLoadedInfo] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    let alive = true;
+    (async () => {
+      const data = await loadSession();
+      if (!alive || !data || data.groups.length === 0) return;
+      useAppStore.getState().hydrate(data);
+      setLoadedInfo(
+        `已载入 ${data.groups.length} 组历史数据（保存于 ${new Date(
+          data.savedAt
+        ).toLocaleString()}）`
+      );
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (loadedInfo) message.success(loadedInfo, 5);
+  }, [loadedInfo]);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    let dirty = false;
+    let lastChangeAt = 0;
+    let lastSaveAt = 0;
+    const unsub = useAppStore.subscribe((s, prev) => {
+      if (
+        s.groups !== prev.groups ||
+        s.waveConfig !== prev.waveConfig ||
+        s.targetShots !== prev.targetShots
+      ) {
+        dirty = true;
+        lastChangeAt = Date.now();
+      }
+    });
+    // 数据静止 2s 即落盘; 连续记录中（打靶不停）最迟 15s 强存一次, 避免去抖被永久推迟
+    const timer = window.setInterval(() => {
+      if (!dirty) return;
+      const now = Date.now();
+      const idle = now - lastChangeAt >= 2000;
+      const stale = now - lastSaveAt >= 15000;
+      if (!idle && !stale) return;
+      dirty = false;
+      lastSaveAt = now;
+      const st = useAppStore.getState();
+      void saveSession({
+        groups: st.groups,
+        nextGroupId: st.nextGroupId,
+        targetShots: st.targetShots,
+        waveConfig: st.waveConfig,
+      });
+    }, 1000);
+    return () => {
+      unsub();
+      clearInterval(timer);
+    };
+  }, []);
+}
+
 export default function App() {
   useSerialEvents();
   useOfflineWatchdog();
+  useSessionPersistence();
 
   const [demoOn, setDemoOn] = useState(false);
   const [view, setView] = useState<MainView>("charts");
