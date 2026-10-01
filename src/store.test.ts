@@ -54,4 +54,23 @@ describe("分组管理", () => {
     ids.forEach((id) => useAppStore.getState().toggleCompare(id));
     expect(useAppStore.getState().compareIds).toEqual(ids.slice(-2));
   });
+
+  it("散布数据写入与清除", () => {
+    useAppStore.getState().startGroup({ ...EMPTY_PARAMS });
+    const id = useAppStore.getState().groups[0].id;
+    useAppStore.getState().setGroupDispersion(id, {
+      imageDataUrl: "data:image/jpeg;base64,AAAA",
+      effSpec: { name: "A4·横向", w: 297, h: 210 },
+      points: [{ x: 10, y: 20 }],
+      texts: [],
+      updatedAt: 123,
+    });
+    let g = useAppStore.getState().groups[0];
+    expect(g.dispersion?.points).toHaveLength(1);
+    expect(g.dispersion?.effSpec.w).toBe(297);
+
+    useAppStore.getState().setGroupDispersion(id, undefined);
+    g = useAppStore.getState().groups[0];
+    expect(g.dispersion).toBeUndefined();
+  });
 });

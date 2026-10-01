@@ -99,6 +99,50 @@ describe("会话序列化", () => {
   it("非法文件抛错", () => {
     expect(() => deserializeSession("{}")).toThrow();
   });
+
+  it("散布分析数据随组往返", () => {
+    const g = group(1, "组1", false);
+    g.dispersion = {
+      imageDataUrl: "data:image/jpeg;base64,/9j/AAAA",
+      effSpec: { name: "A4·横向", w: 297, h: 210 },
+      points: [
+        { x: 1, y: 2 },
+        { x: 3, y: 4 },
+      ],
+      texts: [{ x: 5, y: 6, text: "10 环", size: 18, color: "#f00" }],
+      updatedAt: 1700000000000,
+    };
+    const text = JSON.stringify(
+      serializeSession({
+        groups: [g],
+        nextGroupId: 2,
+        targetShots: 100,
+        waveConfig: { groups: [], channelLabels: {} },
+      })
+    );
+    const back = deserializeSession(text);
+    const d = back.groups[0].dispersion!;
+    expect(d.imageDataUrl).toContain("base64");
+    expect(d.points).toHaveLength(2);
+    expect(d.points[1]).toEqual({ x: 3, y: 4 });
+    expect(d.texts[0].text).toBe("10 环");
+    expect(d.effSpec.w).toBe(297);
+  });
+
+  it("旧文件无散布字段不报错", () => {
+    const text = JSON.stringify({
+      version: 1,
+      savedAt: 0,
+      nextGroupId: 2,
+      targetShots: 100,
+      waveConfig: { groups: [], channelLabels: {} },
+      groups: [
+        { id: 1, name: "组1", params: { ...EMPTY_PARAMS }, startedAt: 0, shots: [] },
+      ],
+    });
+    const back = deserializeSession(text);
+    expect(back.groups[0].dispersion).toBeUndefined();
+  });
 });
 
 describe("导入合并", () => {

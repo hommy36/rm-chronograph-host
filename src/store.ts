@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Group, GroupParams, Shot, SpeedFrameMsg, WaveConfig } from "./types";
+import type { DispersionData, Group, GroupParams, Shot, SpeedFrameMsg, WaveConfig } from "./types";
 import { EMPTY_PARAMS, EMPTY_WAVE_CONFIG } from "./types";
 import { JustFloatParser } from "./justfloat";
 import { SNAP_POST_MS, takeSnapshot, WaveBuffer } from "./wave";
@@ -109,6 +109,8 @@ interface AppState {
   clearWaveforms: () => void;
   /** 删除单个组（含其弹速与波形数据） */
   deleteGroup: (id: number) => void;
+  /** 写入/清空某组的散布分析数据 */
+  setGroupDispersion: (id: number, data: DispersionData | undefined) => void;
 }
 
 function makeGroup(id: number, name: string, params: GroupParams): Group {
@@ -380,4 +382,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         compareIds: s.compareIds.filter((x) => x !== id),
       };
     }),
+
+  setGroupDispersion: (id, data) =>
+    set((s) => ({
+      groups: s.groups.map((g) => (g.id === id ? { ...g, dispersion: data } : g)),
+    })),
 }));

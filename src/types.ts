@@ -11,6 +11,7 @@ export interface SpeedFrameMsg {
 }
 
 import type { WaveSnapshot } from "./wave";
+import type { Pt } from "./dispersion/math";
 
 /** 组内一发记录 */
 export interface Shot {
@@ -21,6 +22,27 @@ export interface Shot {
   at_ms: number;
   /** 发射瞬间摩擦轮波形快照（连接波形口且数据充足时才有） */
   wave?: WaveSnapshot;
+}
+
+/** 裁剪/标定后的有效靶纸尺寸（mm） */
+export interface PaperSpecLike {
+  name: string;
+  w: number;
+  h: number;
+}
+
+/** 散布分析（靶纸）数据，挂在组上 */
+export interface DispersionData {
+  /** 压缩后的靶纸图片 dataURL（最长边 1920，JPEG） */
+  imageDataUrl?: string;
+  /** 标定用的有效纸面尺寸 */
+  effSpec: PaperSpecLike;
+  /** 标定点（统一到 mm 坐标） */
+  points: Pt[];
+  /** 文字标注 */
+  texts: { x: number; y: number; text: string; size: number; color: string }[];
+  /** 更新时间 */
+  updatedAt: number;
 }
 
 /** 测试分组参数（对标 TJSP 文档表 4~7 的记录字段） */
@@ -41,6 +63,8 @@ export interface Group {
   params: GroupParams;
   startedAt: number;
   shots: Shot[];
+  /** 该组的散布分析（靶纸）数据 */
+  dispersion?: DispersionData;
 }
 
 export const EMPTY_PARAMS: GroupParams = {

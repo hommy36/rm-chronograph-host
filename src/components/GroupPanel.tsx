@@ -14,6 +14,7 @@ import {
   Tooltip,
 } from "antd";
 import {
+  AimOutlined,
   CheckCircleFilled,
   DeleteOutlined,
   ExperimentOutlined,
@@ -416,6 +417,16 @@ export default function GroupPanel() {
                       flexShrink: 0,
                     }}
                   >
+                    {g.dispersion && (
+                      <Tooltip title="该组已有散布分析数据">
+                        <span style={{ color: "#1677ff", fontSize: 12 }}>
+                          <AimOutlined />
+                          {g.dispersion.points.length > 0
+                            ? g.dispersion.points.length
+                            : ""}
+                        </span>
+                      </Tooltip>
+                    )}
                     <span style={{ color: "#999", fontSize: 12 }}>
                       {g.shots.length} 发
                     </span>

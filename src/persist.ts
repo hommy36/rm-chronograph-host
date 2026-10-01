@@ -3,7 +3,7 @@
  * 重启自动载入, 支持导出/导入 .rmtest 项目文件。
  * 波形按 Float32Array → base64 存储（每点固定 4 字节, 高精度数据比 JSON 数字小 2~3 倍）。
  */
-import type { Group, GroupParams, Shot, WaveConfig } from "./types";
+import type { DispersionData, Group, GroupParams, Shot, WaveConfig } from "./types";
 import type { WaveSnapshot } from "./wave";
 
 export const SESSION_VERSION = 1;
@@ -54,6 +54,8 @@ interface SerializedGroup {
   params: GroupParams;
   startedAt: number;
   shots: SerializedShot[];
+  /** 散布分析数据（含压缩后的靶纸图片 dataURL），原样存 */
+  dispersion?: DispersionData;
 }
 
 export interface SessionFile {
@@ -82,6 +84,7 @@ export function serializeSession(s: {
       name: g.name,
       params: { ...g.params },
       startedAt: g.startedAt,
+      dispersion: g.dispersion ? { ...g.dispersion, points: [...g.dispersion.points], texts: [...g.dispersion.texts] } : undefined,
       shots: g.shots.map((shot) => {
         const out: SerializedShot = {
           idx: shot.idx,
@@ -118,6 +121,13 @@ export function deserializeSession(text: string): {
     name: g.name,
     params: { ...g.params },
     startedAt: g.startedAt,
+    dispersion: g.dispersion
+      ? ({
+          ...g.dispersion,
+          points: g.dispersion.points ?? [],
+          texts: g.dispersion.texts ?? [],
+        } as DispersionData)
+      : undefined,
     shots: g.shots.map((shot): Shot => {
       const out: Shot = {
         idx: shot.idx,

@@ -42,8 +42,29 @@ import {
   score,
 } from "../dispersion/math";
 import type { Pt } from "../dispersion/math";
+import { useAppStore } from "../store";
 import CropModal from "./CropModal";
 import type { PaperSpec } from "./CropModal";
+
+/** 压缩靶纸图片：最长边不超过 maxEdge，转 JPEG（原图动辄几 MB，存进组会撑大会话文件） */
+function compressImage(
+  image: HTMLImageElement,
+  maxEdge = 1920,
+  quality = 0.85
+): string {
+  const w = image.naturalWidth;
+  const h = image.naturalHeight;
+  const r = Math.min(1, maxEdge / Math.max(w, h));
+  const cw = Math.max(1, Math.round(w * r));
+  const ch = Math.max(1, Math.round(h * r));
+  const c = document.createElement("canvas");
+  c.width = cw;
+  c.height = ch;
+  const ctx = c.getContext("2d");
+  if (!ctx) return image.src;
+  ctx.drawImage(image, 0, 0, cw, ch);
+  return c.toDataURL("image/jpeg", quality);
+}
 
 export const PAPER_SIZES: PaperSpec[] = [
   { name: "A4", w: 210, h: 297 },
@@ -254,6 +275,76 @@ export default function DispersionPanel(props: { onBack: () => void }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
+  /** 当前组：散布分析数据记录到该组，切换组时自动载入对应靶纸 */
+  const groupId = useAppStore((s) => s.viewingGroupId);
+  const group = useAppStore(
+    (s) => s.groups.find((g) => g.id === s.viewingGroupId) ?? null
+  );
+  const setGroupDispersion = useAppStore((s) => s.setGroupDispersion);
+  /** 当前靶纸图片的压缩 dataURL（写回组里） */
+  const [imgDataUrl, setImgDataUrl] = useState<string | undefined>(undefined);
+  /** 正在从组数据载入，避免载入过程反过来触发写回 */
+  const loadingRef = useRef(false);
+
+  // 组切换：把该组已存的散布数据载入到面板
+  useEffect(() => {
+    loadingRef.current = true;
+    const d = group?.dispersion;
+    setPoints(d ? d.points.map((p) => ({ ...p })) : []);
+    setTexts(d ? d.texts.map((t) => ({ ...t })) : []);
+    if (d) {
+      setEffSpec({ ...d.effSpec });
+      setCropped(true);
+    } else {
+      setCropped(false);
+    }
+    setImgDataUrl(d?.imageDataUrl);
+    if (d?.imageDataUrl) {
+      const image = new Image();
+      image.onload = () => {
+        setImg(image);
+        setAutoFit(true);
+        loadingRef.current = false;
+      };
+      image.onerror = () => {
+        setImg(null);
+        loadingRef.current = false;
+      };
+      image.src = d.imageDataUrl;
+    } else {
+      setImg(null);
+      loadingRef.current = false;
+    }
+    // 仅在切组时同步，不跟随组对象的每次更新（避免与写回互相触发）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupId]);
+
+  // 任何编辑都写回当前组（300ms 去抖）
+  useEffect(() => {
+    if (!groupId || loadingRef.current) return;
+    const t = window.setTimeout(() => {
+      const cur = useAppStore
+        .getState()
+        .groups.find((g) => g.id === groupId);
+      const empty = !imgDataUrl && points.length === 0 && texts.length === 0;
+      // 组里本来也没有数据时，不必写入空对象
+      if (empty && !cur?.dispersion) return;
+      setGroupDispersion(
+        groupId,
+        empty
+          ? undefined
+          : {
+              imageDataUrl: imgDataUrl,
+              effSpec: { name: effSpec.name, w: effSpec.w, h: effSpec.h },
+              points,
+              texts,
+              updatedAt: Date.now(),
+            }
+      );
+    }, 300);
+    return () => clearTimeout(t);
+  }, [groupId, imgDataUrl, effSpec, points, texts, setGroupDispersion]);
+
   const natural = img
     ? { w: img.naturalWidth, h: img.naturalHeight }
     : { w: 0, h: 0 };
@@ -335,6 +426,7 @@ export default function DispersionPanel(props: { onBack: () => void }) {
       const image = new Image();
       image.onload = () => {
         setImg(image);
+        setImgDataUrl(compressImage(image));
         setCropped(false);
         setPoints([]);
         setTexts([]);
@@ -489,6 +581,11 @@ export default function DispersionPanel(props: { onBack: () => void }) {
         <Space size={6}>
           <AimOutlined style={{ color: "#1677ff" }} />
           <span>散布分析（靶纸弹道）</span>
+          {group ? (
+            <Tag color="blue">记录到：{group.name}</Tag>
+          ) : (
+            <Tag color="warning">未选择组：数据不会保存</Tag>
+          )}
           {img && (
             <Tag color={cropped ? "green" : "orange"}>
               {cropped
@@ -827,6 +924,7 @@ export default function DispersionPanel(props: { onBack: () => void }) {
         onCancel={() => setCropOpen(false)}
         onConfirm={(image, spec) => {
           setImg(image);
+          setImgDataUrl(compressImage(image));
           setEffSpec(spec);
           setCropped(true);
           setPoints([]);
