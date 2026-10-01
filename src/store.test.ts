@@ -55,6 +55,21 @@ describe("分组管理", () => {
     expect(useAppStore.getState().compareIds).toEqual(ids.slice(-2));
   });
 
+  it("组内波形通道分配可写入并随组保留", () => {
+    useAppStore.getState().startGroup({ ...EMPTY_PARAMS });
+    const id = useAppStore.getState().groups[0].id;
+    useAppStore.getState().setGroupWaveConfig(id, {
+      groups: [{ id: 1, name: "一级", channels: [0, 2, 4] }],
+      channelLabels: { 0: "一1", 2: "一2", 4: "一3" },
+      channelCount: 14,
+    });
+    const g = useAppStore.getState().groups[0];
+    expect(g.waveConfig?.groups[0].channels).toEqual([0, 2, 4]);
+    expect(g.waveConfig?.channelCount).toBe(14);
+    // 组内配置不影响全局默认
+    expect(useAppStore.getState().waveConfig.groups).toHaveLength(0);
+  });
+
   it("散布数据写入与清除", () => {
     useAppStore.getState().startGroup({ ...EMPTY_PARAMS });
     const id = useAppStore.getState().groups[0].id;
