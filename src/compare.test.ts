@@ -6,6 +6,7 @@ import {
   compareWheelRows,
   groupDispersion,
   pairedHistogram,
+  recenterToMean,
 } from "./compare";
 import type { Group, WaveConfig } from "./types";
 import { EMPTY_PARAMS } from "./types";
@@ -166,6 +167,21 @@ describe("groupDispersion / compareDispersion", () => {
     const [x, y] = compareDispersion(group(1, "A", [], null), group(2, "B", [], null));
     expect(x.hasData).toBe(false);
     expect(y.hasData).toBe(false);
+  });
+
+  it("recenterToMean 把点群重心平移到原点", () => {
+    const shifted = recenterToMean([
+      { x: 100, y: 50 },
+      { x: 110, y: 60 },
+      { x: 90, y: 40 },
+    ]);
+    const mx = shifted.reduce((a, p) => a + p.x, 0) / shifted.length;
+    const my = shifted.reduce((a, p) => a + p.y, 0) / shifted.length;
+    expect(mx).toBeCloseTo(0, 10);
+    expect(my).toBeCloseTo(0, 10);
+    // 相对形状保持不变（两点间距不变）
+    expect(shifted[1].x - shifted[0].x).toBeCloseTo(10, 10);
+    expect(recenterToMean([])).toEqual([]);
   });
 });
 

@@ -206,6 +206,16 @@ export function compareDispersion(a: Group, b: Group): [DispersionSide, Dispersi
   return [groupDispersion(a), groupDispersion(b)];
 }
 
+/** 把落点整体平移，使其弹着中心（点群重心）落在原点——用于重合两组散布做形状对比 */
+export function recenterToMean(points: { x: number; y: number }[]): {
+  x: number;
+  y: number;
+}[] {
+  const c = meanPoint(points);
+  if (!c) return points;
+  return points.map((p) => ({ x: p.x - c.x, y: p.y - c.y }));
+}
+
 /** 对比结果导出 CSV */export function buildCompareCsv(
   a: Group,
   b: Group,

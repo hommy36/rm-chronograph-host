@@ -1,7 +1,18 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import ReactECharts from "echarts-for-react";
 import type { EChartsOption, SeriesOption } from "echarts";
-import { Button, Card, Empty, Modal, Space, Table, Tag, message } from "antd";
+import {
+  Button,
+  Card,
+  Empty,
+  Modal,
+  Space,
+  Switch,
+  Table,
+  Tag,
+  Tooltip,
+  message,
+} from "antd";
 import { DownloadOutlined, FundOutlined } from "@ant-design/icons";
 import { useAppStore } from "../store";
 import {
@@ -10,6 +21,7 @@ import {
   compareStatsRows,
   compareWheelRows,
   pairedHistogram,
+  recenterToMean,
 } from "../compare";
 import { saveCsv } from "../csv";
 import { meanPoint } from "../dispersion/math";
@@ -39,6 +51,8 @@ export default function CompareModal(props: {
     [a, b, waveConfig]
   );
 
+  const [alignCenters, setAlignCenters] = useState(true);
+
   const [disA, disB] = useMemo(
     () =>
       a && b
@@ -49,7 +63,10 @@ export default function CompareModal(props: {
 
   const dispersionOption = useMemo<EChartsOption>(() => {
     if (!a || !b || !disA || !disB) return {};
-    const all = [...disA.pointsMm, ...disB.pointsMm];
+    // 重合弹着中心：把两组各自平移到点群重心为原点，直接比散布形状
+    const pa = alignCenters ? recenterToMean(disA.pointsMm) : disA.pointsMm;
+    const pb = alignCenters ? recenterToMean(disB.pointsMm) : disB.pointsMm;
+    const all = [...pa, ...pb];
     const maxAbs = Math.max(
       30,
       ...all.map((p) => Math.max(Math.abs(p.x), Math.abs(p.y)))
@@ -111,11 +128,11 @@ export default function CompareModal(props: {
         splitLine: { lineStyle: { type: "dashed" } },
       },
       series: [
-        ...seriesOf(a.name, disA.pointsMm, COLOR_A),
-        ...seriesOf(b.name, disB.pointsMm, COLOR_B),
+        ...seriesOf(a.name, pa, COLOR_A),
+        ...seriesOf(b.name, pb, COLOR_B),
       ],
     };
-  }, [a, b, disA, disB]);
+  }, [a, b, disA, disB, alignCenters]);
 
   const dispersionRows = useMemo(() => {
     if (!disA || !disB) return [];
@@ -404,7 +421,28 @@ export default function CompareModal(props: {
           {(disA?.hasData || disB?.hasData) && (
             <Card
               size="small"
-              title="散布对比（靶纸落点，圆点为一发弹孔；坐标以各自纸面中心为原点）"
+              title={
+                <Space size={8}>
+                  <span>散布对比（靶纸落点，圆点为一发弹孔）</span>
+                  <span style={{ color: "#888", fontWeight: 400, fontSize: 12 }}>
+                    {alignCenters
+                      ? "坐标：以各自弹着中心为原点（已重合）"
+                      : "坐标：以各自纸面中心为原点"}
+                  </span>
+                </Space>
+              }
+              extra={
+                <Tooltip title="把两组落点平移到各自弹着中心重合，直接比散布形状；关掉则按靶纸上的真实位置对比（可看出归零差异）">
+                  <Space size={4}>
+                    <Switch
+                      size="small"
+                      checked={alignCenters}
+                      onChange={setAlignCenters}
+                    />
+                    <span style={{ fontSize: 12 }}>重合弹着中心</span>
+                  </Space>
+                </Tooltip>
+              }
               styles={{ body: { padding: 4 } }}
             >
               <div style={{ display: "flex", gap: 12, alignItems: "stretch" }}>
