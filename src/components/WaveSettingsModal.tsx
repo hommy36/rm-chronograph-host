@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import { Button, Input, Modal, Select, Space, Table, Tag } from "antd";
-import { PlusOutlined } from "@ant-design/icons";
+import { Button, Card, Input, Modal, Select, Space, Tag, Tooltip } from "antd";
+import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import { useAppStore } from "../store";
 import type { WaveConfig, WheelGroupCfg } from "../types";
 
@@ -39,60 +39,121 @@ export default function WaveSettingsModal(props: {
     }
   }
 
-  // 展示的通道行数：已识别通道数与已配置通道取大，至少 8
-  const maxConfigured = useMemo(() => {
-    let m = -1;
+  /** 可选通道号：已识别通道数与已用通道取大，至少 8 个 */
+  const channelOptions = useMemo(() => {
+    let maxUsed = -1;
     for (const g of draft.groups) {
-      for (const c of g.channels) if (c > m) m = c;
+      for (const c of g.channels) if (c > maxUsed) maxUsed = c;
     }
-    for (const k of Object.keys(draft.channelLabels)) {
-      const c = Number(k);
-      if (c > m) m = c;
-    }
-    return m;
-  }, [draft]);
-  const rowCount = Math.max(waveChannelCount, maxConfigured + 1, 8);
+    const n = Math.max(waveChannelCount, maxUsed + 1, 8);
+    return Array.from({ length: n }, (_, i) => ({
+      value: i,
+      label: `通道 ${i}`,
+    }));
+  }, [draft, waveChannelCount]);
 
-  /** 通道 → 所属组 id */
-  const channelGroup = useMemo(() => {
-    const map = new Map<number, number>();
-    for (const g of draft.groups) {
-      for (const c of g.channels) map.set(c, g.id);
-    }
-    return map;
+  /** 已被占用的通道（用于新增轮子时挑一个没被占的） */
+  const usedChannels = useMemo(() => {
+    const s = new Set<number>();
+    for (const g of draft.groups) for (const c of g.channels) s.add(c);
+    return s;
   }, [draft]);
 
-  const assignChannel = (ch: number, groupId: number | null) => {
+  const freeChannel = () => {
+    for (let i = 0; i < 64; i++) if (!usedChannels.has(i)) return i;
+    return 0;
+  };
+
+  const labelOf = (ch: number) => draft.channelLabels[ch] ?? "";
+
+  /** 设置某轮子的通道：标签跟着轮子一起搬到新通道 */
+  const setWheelChannel = (gi: number, wi: number, ch: number) => {
+    setDraft((d) => {
+      const groups = d.groups.map((g, i) =>
+        i === gi
+          ? { ...g, channels: g.channels.map((c, j) => (j === wi ? ch : c)) }
+          : g
+      );
+      const old = d.groups[gi].channels[wi];
+      const labels = { ...d.channelLabels };
+      const stillUsed = groups.some((g) => g.channels.includes(old));
+      const label = labels[old];
+      if (ch !== old) {
+        if (!stillUsed) delete labels[old];
+        if (label !== undefined) labels[ch] = label;
+      }
+      return { ...d, groups, channelLabels: labels };
+    });
+  };
+
+  const setWheelLabel = (ch: number, text: string) =>
     setDraft((d) => ({
       ...d,
-      groups: d.groups.map((g) => ({
-        ...g,
-        channels:
-          groupId === g.id
-            ? [...new Set([...g.channels, ch])].sort((a, b) => a - b)
-            : g.channels.filter((c) => c !== ch),
-      })),
+      channelLabels: { ...d.channelLabels, [ch]: text },
+    }));
+
+  const addWheel = (gi: number) =>
+    setDraft((d) => ({
+      ...d,
+      groups: d.groups.map((g, i) =>
+        i === gi ? { ...g, channels: [...g.channels, freeChannel()] } : g
+      ),
+    }));
+
+  const removeWheel = (gi: number, wi: number) =>
+    setDraft((d) => {
+      const groups = d.groups.map((g, i) =>
+        i === gi ? { ...g, channels: g.channels.filter((_, j) => j !== wi) } : g
+      );
+      const removed = d.groups[gi].channels[wi];
+      const labels = { ...d.channelLabels };
+      if (!groups.some((g) => g.channels.includes(removed))) delete labels[removed];
+      return { ...d, groups, channelLabels: labels };
+    });
+
+  const addGroup = () => {
+    const ch = freeChannel();
+    setDraft((d) => ({
+      ...d,
+      groups: [
+        ...d.groups,
+        { id: nextGroupCfgId++, name: `组${d.groups.length + 1}`, channels: [ch] },
+      ],
     }));
   };
 
+  const setGroupName = (gi: number, name: string) =>
+    setDraft((d) => ({
+      ...d,
+      groups: d.groups.map((g, i) => (i === gi ? { ...g, name } : g)),
+    }));
+
+  const removeGroup = (gi: number) =>
+    setDraft((d) => {
+      const gone = d.groups[gi];
+      const groups = d.groups.filter((_, i) => i !== gi);
+      const labels = { ...d.channelLabels };
+      for (const ch of gone.channels) {
+        if (!groups.some((g) => g.channels.includes(ch))) delete labels[ch];
+      }
+      return { ...d, groups, channelLabels: labels };
+    });
+
+  /** 预设：按"轮子数"建组，通道从 0 开始顺序指派 */
   const applyPreset = (stage1: number, stage2: number) => {
-    const g1: WheelGroupCfg = {
-      id: nextGroupCfgId++,
-      name: "一级",
-      channels: Array.from({ length: stage1 }, (_, i) => i),
-    };
-    const groups: WheelGroupCfg[] = [g1];
     const labels: Record<number, string> = {};
-    g1.channels.forEach((c, i) => (labels[c] = `一${i + 1}`));
-    if (stage2 > 0) {
-      const g2: WheelGroupCfg = {
-        id: nextGroupCfgId++,
-        name: "二级",
-        channels: Array.from({ length: stage2 }, (_, i) => stage1 + i),
-      };
-      groups.push(g2);
-      g2.channels.forEach((c, i) => (labels[c] = `二${i + 1}`));
-    }
+    const build = (
+      groupName: string,
+      labelPrefix: string,
+      n: number,
+      from: number
+    ): WheelGroupCfg => {
+      const channels = Array.from({ length: n }, (_, i) => from + i);
+      channels.forEach((c, i) => (labels[c] = `${labelPrefix}${i + 1}`));
+      return { id: nextGroupCfgId++, name: groupName, channels };
+    };
+    const groups: WheelGroupCfg[] = [build("一级", "一", stage1, 0)];
+    if (stage2 > 0) groups.push(build("二级", "二", stage2, stage1));
     setDraft({ groups, channelLabels: labels });
   };
 
@@ -115,20 +176,20 @@ export default function WaveSettingsModal(props: {
       onOk={handleSave}
       okText="保存"
       cancelText="取消"
-      width={640}
+      width={680}
+      styles={{ body: { maxHeight: "calc(100vh - 220px)", overflowY: "auto" } }}
     >
       <Space direction="vertical" style={{ width: "100%" }} size="middle">
-        <div>
+        <div style={{ fontSize: 12, color: "#888", lineHeight: 1.7 }}>
           已识别通道数：
           {waveChannelCount > 0 ? (
             <Tag color="blue">{waveChannelCount}</Tag>
           ) : (
             <Tag>未识别（连接波形口后自动识别）</Tag>
           )}
-          <span style={{ color: "#888" }}>
-            把每个 JustFloat 通道指派到对应摩擦轮组，同组轮子会算轮间差
-          </span>
+          给每个摩擦轮选它对应的 JustFloat 通道；同一组内的轮子会算组内轮间差。
         </div>
+
         <Space wrap>
           <span style={{ color: "#888" }}>快捷预设：</span>
           <Button size="small" onClick={() => applyPreset(1, 1)}>
@@ -141,107 +202,101 @@ export default function WaveSettingsModal(props: {
             双级六摩擦 3+3
           </Button>
         </Space>
-        <Table
-          size="small"
-          rowKey={(r) => r.ch}
-          pagination={false}
-          dataSource={Array.from({ length: rowCount }, (_, ch) => ({ ch }))}
-          columns={[
-            {
-              title: "通道",
-              dataIndex: "ch",
-              width: 70,
-              render: (ch: number) => `#${ch}`,
-            },
-            {
-              title: "标签（轮子名）",
-              dataIndex: "ch",
-              render: (ch: number) => (
+
+        {draft.groups.map((g, gi) => (
+          <Card
+            key={g.id}
+            size="small"
+            styles={{ body: { padding: "8px 12px" } }}
+            title={
+              <Space size={6}>
+                <span
+                  style={{
+                    display: "inline-block",
+                    width: 10,
+                    height: 10,
+                    borderRadius: 2,
+                    background: GROUP_COLORS[gi % GROUP_COLORS.length],
+                  }}
+                />
                 <Input
                   size="small"
                   style={{ width: 120 }}
-                  placeholder={`通道${ch}`}
-                  value={draft.channelLabels[ch] ?? ""}
-                  onChange={(e) =>
-                    setDraft((d) => ({
-                      ...d,
-                      channelLabels: { ...d.channelLabels, [ch]: e.target.value },
-                    }))
-                  }
-                />
-              ),
-            },
-            {
-              title: "所属轮组",
-              dataIndex: "ch",
-              render: (ch: number) => (
-                <Select
-                  size="small"
-                  style={{ width: 160 }}
-                  value={channelGroup.get(ch) ?? null}
-                  placeholder="未分配"
-                  allowClear
-                  onChange={(v: number | null) => assignChannel(ch, v)}
-                  options={draft.groups.map((g) => ({ value: g.id, label: g.name }))}
-                />
-              ),
-            },
-          ]}
-        />
-        <div>
-          <div style={{ marginBottom: 6, color: "#888" }}>轮组管理：</div>
-          <Space wrap>
-            {draft.groups.map((g, gi) => (
-              <Tag
-                key={g.id}
-                closable
-                color={GROUP_COLORS[gi % GROUP_COLORS.length]}
-                onClose={() =>
-                  setDraft((d) => ({
-                    ...d,
-                    groups: d.groups.filter((x) => x.id !== g.id),
-                  }))
-                }
-              >
-                <Input
-                  size="small"
-                  bordered={false}
-                  style={{
-                    width: 56,
-                    background: "transparent",
-                    color: "inherit",
-                    padding: 0,
-                  }}
                   value={g.name}
-                  onChange={(e) =>
-                    setDraft((d) => ({
-                      ...d,
-                      groups: d.groups.map((x) =>
-                        x.id === g.id ? { ...x, name: e.target.value } : x
-                      ),
-                    }))
-                  }
+                  onChange={(e) => setGroupName(gi, e.target.value)}
                 />
-                （{g.channels.length} 轮）
-              </Tag>
-            ))}
-            <Button
-              size="small"
-              icon={<PlusOutlined />}
-              onClick={() =>
-                setDraft((d) => ({
-                  ...d,
-                  groups: [
-                    ...d.groups,
-                    { id: nextGroupCfgId++, name: `组${d.groups.length + 1}`, channels: [] },
-                  ],
-                }))
-              }
-            >
-              加轮组
-            </Button>
-          </Space>
-        </div>
+                <span style={{ fontSize: 12, color: "#999", fontWeight: 400 }}>
+                  {g.channels.length} 个轮子
+                </span>
+              </Space>
+            }
+            extra={
+              <Tooltip title="删除该轮组">
+                <Button
+                  size="small"
+                  type="text"
+                  danger
+                  icon={<DeleteOutlined />}
+                  onClick={() => removeGroup(gi)}
+                />
+              </Tooltip>
+            }
+          >
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {g.channels.map((ch, wi) => (
+                <div
+                  key={wi}
+                  style={{ display: "flex", alignItems: "center", gap: 8 }}
+                >
+                  <span style={{ fontSize: 12, color: "#888", width: 42 }}>
+                    轮 {wi + 1}
+                  </span>
+                  <Input
+                    size="small"
+                    style={{ width: 140 }}
+                    placeholder={`轮${wi + 1}`}
+                    value={labelOf(ch)}
+                    onChange={(e) => setWheelLabel(ch, e.target.value)}
+                  />
+                  <span style={{ fontSize: 12, color: "#888" }}>读通道</span>
+                  <Select
+                    size="small"
+                    style={{ width: 130 }}
+                    value={ch}
+                    onChange={(v) => setWheelChannel(gi, wi, v)}
+                    options={channelOptions}
+                  />
+                  <Tooltip title="删除这个轮子">
+                    <Button
+                      size="small"
+                      type="text"
+                      icon={<DeleteOutlined />}
+                      onClick={() => removeWheel(gi, wi)}
+                    />
+                  </Tooltip>
+                </div>
+              ))}
+              <div>
+                <Button
+                  size="small"
+                  icon={<PlusOutlined />}
+                  onClick={() => addWheel(gi)}
+                >
+                  加轮子
+                </Button>
+              </div>
+            </div>
+          </Card>
+        ))}
+
+        <Button icon={<PlusOutlined />} onClick={addGroup} block>
+          加轮组
+        </Button>
+        {draft.groups.length === 0 && (
+          <div style={{ fontSize: 12, color: "#999", textAlign: "center" }}>
+            还没有轮组：用上面的预设，或点「加轮组」从空配置开始
+          </div>
+        )}
       </Space>
     </Modal>
   );
