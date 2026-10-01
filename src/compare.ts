@@ -138,6 +138,36 @@ export function compareWheelRows(
   });
 }
 
+/** 取一个规整的刻度步长，让每边网格线数量适中 */
+export function niceStep(range: number): number {
+  const candidates = [2, 5, 10, 20, 25, 50, 100, 200, 250, 500];
+  for (const c of candidates) {
+    if (range / c <= 4) return c;
+  }
+  return 1000;
+}
+
+/**
+ * 让 x/y 两轴的"毫米/像素"严格一致（否则散布形状会被绘图区比例拉扁）。
+ * y 轴范围取整到规整步长，x 轴按绘图区宽高比精确推出；
+ * 网格线数量各自就近取整，视觉上接近正方形（不牺牲比例尺精度）。
+ */
+export function equalScaleRanges(
+  maxAbs: number,
+  plotW: number,
+  plotH: number
+): { limX: number; limY: number; step: number; splitX: number; splitY: number } {
+  const target = Math.max(1, maxAbs * 1.12);
+  const step = niceStep(target);
+  const limY = Math.max(step, Math.ceil(target / step) * step);
+  const w = Math.max(1, plotW);
+  const h = Math.max(1, plotH);
+  const limX = Math.max(step, (limY * w) / h);
+  const splitY = Math.max(1, Math.round((limY * 2) / step));
+  const splitX = Math.max(1, Math.round((limX * 2) / step));
+  return { limX, limY, step, splitX, splitY };
+}
+
 /** 单组散布分析结果（落点统一到 mm，并以纸面中心为原点） */
 export interface DispersionSide {
   hasData: boolean;

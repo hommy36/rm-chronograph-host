@@ -4,6 +4,7 @@ import {
   compareDispersion,
   compareStatsRows,
   compareWheelRows,
+  equalScaleRanges,
   groupDispersion,
   pairedHistogram,
   recenterToMean,
@@ -169,8 +170,7 @@ describe("groupDispersion / compareDispersion", () => {
     expect(y.hasData).toBe(false);
   });
 
-  it("recenterToMean 把点群重心平移到原点", () => {
-    const shifted = recenterToMean([
+  it("recenterToMean 把点群重心平移到原点", () => {    const shifted = recenterToMean([
       { x: 100, y: 50 },
       { x: 110, y: 60 },
       { x: 90, y: 40 },
@@ -182,6 +182,35 @@ describe("groupDispersion / compareDispersion", () => {
     // 相对形状保持不变（两点间距不变）
     expect(shifted[1].x - shifted[0].x).toBeCloseTo(10, 10);
     expect(recenterToMean([])).toEqual([]);
+  });
+});
+
+describe("equalScaleRanges", () => {
+  it("两轴毫米/像素严格一致（宽扁绘图区下 x 范围更宽）", () => {
+    const plotW = 1000;
+    const plotH = 400;
+    const { limX, limY, step, splitX, splitY } = equalScaleRanges(100, plotW, plotH);
+    expect((limX * 2) / plotW).toBeCloseTo((limY * 2) / plotH, 10);
+    expect(limY).toBeGreaterThanOrEqual(100); // 覆盖数据
+    expect(limX).toBeGreaterThan(limY);
+    expect(limY % step).toBe(0); // y 取整到规整步长
+    // 网格接近正方形（每格 mm 相差不超过 1 格步长带来的误差）
+    const cellX = (limX * 2) / splitX;
+    const cellY = (limY * 2) / splitY;
+    expect(Math.abs(cellX - cellY)).toBeLessThan(step);
+  });
+
+  it("正方形绘图区时两轴范围相同", () => {
+    const { limX, limY } = equalScaleRanges(80, 600, 600);
+    expect(limX).toBeCloseTo(limY, 10);
+  });
+
+  it("极小散布也有合理下限", () => {
+    const { limX, limY, step, splitX } = equalScaleRanges(0, 500, 500);
+    expect(limY).toBeGreaterThan(0);
+    expect(limX).toBeCloseTo(limY, 10);
+    expect(step).toBeGreaterThan(0);
+    expect(splitX).toBeGreaterThanOrEqual(1);
   });
 });
 

@@ -78,6 +78,19 @@ function compressImage(
   return c.toDataURL("image/jpeg", quality);
 }
 
+/** 用压缩后的图作为工作图：保证内存坐标与存盘坐标一致（否则重开后标点会偏移） */
+function loadAsCompressed(
+  image: HTMLImageElement
+): Promise<{ img: HTMLImageElement; dataUrl: string }> {
+  return new Promise((resolve, reject) => {
+    const dataUrl = compressImage(image);
+    const out = new Image();
+    out.onload = () => resolve({ img: out, dataUrl });
+    out.onerror = () => reject(new Error("图片处理失败"));
+    out.src = dataUrl;
+  });
+}
+
 /** 增强面板里的单行滑块 */
 function EnhanceRow(props: {
   label: string;
@@ -432,6 +445,17 @@ export default function DispersionPanel(props: { onBack: () => void }) {
     if (d?.imageDataUrl) {
       const image = new Image();
       image.onload = () => {
+        // 旧数据可能按"未压缩原图"的像素坐标存点，而这里渲染的是压缩图：
+        // 尺寸不一致时按比例把点和文字标注一起缩放回来，避免标点偏移
+        const k =
+          d.imgW && d.imgW !== image.naturalWidth
+            ? image.naturalWidth / d.imgW
+            : 1;
+        if (k !== 1) {
+          setPoints((ps) => ps.map((p) => ({ x: p.x * k, y: p.y * k })));
+          setTexts((ts) => ts.map((t) => ({ ...t, x: t.x * k, y: t.y * k })));
+        }
+        setImgNatural({ w: image.naturalWidth, h: image.naturalHeight });
         setImg(image);
         setAutoFit(true);
         loadingRef.current = false;
@@ -590,14 +614,19 @@ export default function DispersionPanel(props: { onBack: () => void }) {
     reader.onload = () => {
       const url = String(reader.result);
       const image = new Image();
-      image.onload = () => {
-        setImg(image);
-        setImgDataUrl(compressImage(image));
-        setImgNatural({ w: image.naturalWidth, h: image.naturalHeight });
-        setCropped(false);
-        setPoints([]);
-        setTexts([]);
-        setAutoFit(true);
+      image.onload = async () => {
+        try {
+          const { img: work, dataUrl } = await loadAsCompressed(image);
+          setImg(work);
+          setImgDataUrl(dataUrl);
+          setImgNatural({ w: work.naturalWidth, h: work.naturalHeight });
+          setCropped(false);
+          setPoints([]);
+          setTexts([]);
+          setAutoFit(true);
+        } catch {
+          message.error("图片处理失败");
+        }
       };
       image.onerror = () => message.error("图片加载失败");
       image.src = url;
@@ -1237,16 +1266,21 @@ export default function DispersionPanel(props: { onBack: () => void }) {
         paper={paper}
         onPaperChange={setPaper}
         onCancel={() => setCropOpen(false)}
-        onConfirm={(image, spec) => {
-          setImg(image);
-          setImgDataUrl(compressImage(image));
-          setImgNatural({ w: image.naturalWidth, h: image.naturalHeight });
-          setEffSpec(spec);
-          setCropped(true);
-          setPoints([]);
-          setTexts([]);
+        onConfirm={async (image, spec) => {
           setCropOpen(false);
-          setAutoFit(true);
+          try {
+            const { img: work, dataUrl } = await loadAsCompressed(image);
+            setImg(work);
+            setImgDataUrl(dataUrl);
+            setImgNatural({ w: work.naturalWidth, h: work.naturalHeight });
+            setEffSpec(spec);
+            setCropped(true);
+            setPoints([]);
+            setTexts([]);
+            setAutoFit(true);
+          } catch {
+            message.error("裁剪结果处理失败");
+          }
         }}
       />
       <input

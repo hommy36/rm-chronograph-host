@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactECharts from "echarts-for-react";
 import type { EChartsOption, SeriesOption } from "echarts";
 import {
@@ -20,6 +20,7 @@ import {
   compareDispersion,
   compareStatsRows,
   compareWheelRows,
+  equalScaleRanges,
   pairedHistogram,
   recenterToMean,
 } from "../compare";
@@ -53,6 +54,21 @@ export default function CompareModal(props: {
 
   const [alignCenters, setAlignCenters] = useState(true);
 
+  /** 散布对比图的绘图区尺寸：用它把 x/y 轴 mm 比例尺对齐（不然形状会被拉扁） */
+  const chartWrapRef = useRef<HTMLDivElement>(null);
+  const [chartBox, setChartBox] = useState({ w: 760, h: 340 });
+  useEffect(() => {
+    if (!props.open) return;
+    const el = chartWrapRef.current;
+    if (!el) return;
+    const update = () =>
+      setChartBox({ w: el.clientWidth || 760, h: el.clientHeight || 340 });
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [props.open]);
+
   const [disA, disB] = useMemo(
     () =>
       a && b
@@ -71,7 +87,14 @@ export default function CompareModal(props: {
       30,
       ...all.map((p) => Math.max(Math.abs(p.x), Math.abs(p.y)))
     );
-    const lim = Math.ceil((maxAbs * 1.15) / 10) * 10;
+    // 两轴 mm/像素 必须一致，否则散布形状会失真
+    const PAD_L = 58;
+    const PAD_R = 26;
+    const PAD_T = 44;
+    const PAD_B = 44;
+    const plotW = Math.max(120, chartBox.w - PAD_L - PAD_R);
+    const plotH = Math.max(120, chartBox.h - PAD_T - PAD_B);
+    const { limX, limY, splitX, splitY } = equalScaleRanges(maxAbs, plotW, plotH);
     const seriesOf = (
       name: string,
       pts: { x: number; y: number }[],
@@ -104,7 +127,7 @@ export default function CompareModal(props: {
     return {
       animation: true,
       animationDuration: 300,
-      grid: { left: 56, right: 24, top: 44, bottom: 44 },
+      grid: { left: PAD_L, right: PAD_R, top: PAD_T, bottom: PAD_B },
       legend: { top: 4, textStyle: { fontSize: 11 } },
       tooltip: {
         formatter: (p: unknown) => {
@@ -115,16 +138,18 @@ export default function CompareModal(props: {
       xAxis: {
         type: "value",
         name: "mm（右为正）",
-        min: -lim,
-        max: lim,
+        min: -limX,
+        max: limX,
+        splitNumber: splitX,
         splitLine: { lineStyle: { type: "dashed" } },
       },
       yAxis: {
         type: "value",
         name: "mm（上为正）",
-        min: -lim,
-        max: lim,
+        min: -limY,
+        max: limY,
         inverse: true,
+        splitNumber: splitY,
         splitLine: { lineStyle: { type: "dashed" } },
       },
       series: [
@@ -132,7 +157,7 @@ export default function CompareModal(props: {
         ...seriesOf(b.name, pb, COLOR_B),
       ],
     };
-  }, [a, b, disA, disB, alignCenters]);
+  }, [a, b, disA, disB, alignCenters, chartBox]);
 
   const dispersionRows = useMemo(() => {
     if (!disA || !disB) return [];
@@ -446,7 +471,7 @@ export default function CompareModal(props: {
               styles={{ body: { padding: 4 } }}
             >
               <div style={{ display: "flex", gap: 12, alignItems: "stretch" }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ flex: 1, minWidth: 0 }} ref={chartWrapRef}>
                   <ReactECharts
                     option={dispersionOption}
                     style={{ height: 340 }}
