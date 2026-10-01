@@ -149,7 +149,15 @@ export default function GroupPanel() {
         display: "flex",
         flexDirection: "column",
       }}
-      styles={{ body: { flex: 1, minHeight: 0, overflow: "auto" } }}
+      styles={{
+        body: {
+          flex: 1,
+          minHeight: 0,
+          overflow: "auto",
+          display: "flex",
+          flexDirection: "column",
+        },
+      }}
     >
       {/* 参数表单：标签内嵌输入框，各行对齐 */}
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -336,7 +344,8 @@ export default function GroupPanel() {
               display: "flex",
               flexDirection: "column",
               gap: 4,
-              maxHeight: 200,
+              flex: 1,
+              minHeight: 0,
               overflow: "auto",
             }}
           >
