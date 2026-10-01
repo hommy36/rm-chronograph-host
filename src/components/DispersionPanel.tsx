@@ -425,11 +425,14 @@ export default function DispersionPanel(props: { onBack: () => void }) {
   const loadingRef = useRef(false);
   /** 该组是否已完成一次数据同步（同步后的首个提交不回写，避免用初始空状态覆盖组数据） */
   const readyRef = useRef(false);
+  /** 图片是否已加载完成（加载前不回写，避免把过期尺寸/空点写回组里） */
+  const imgLoadedRef = useRef(false);
 
   // 组切换：把该组已存的散布数据载入到面板
   useEffect(() => {
     loadingRef.current = true;
     readyRef.current = false;
+    imgLoadedRef.current = false;
     const d = group?.dispersion;
     setPoints(d ? d.points.map((p) => ({ ...p })) : []);
     setTexts(d ? d.texts.map((t) => ({ ...t })) : []);
@@ -445,17 +448,25 @@ export default function DispersionPanel(props: { onBack: () => void }) {
     if (d?.imageDataUrl) {
       const image = new Image();
       image.onload = () => {
-        // 旧数据可能按"未压缩原图"的像素坐标存点，而这里渲染的是压缩图：
-        // 尺寸不一致时按比例把点和文字标注一起缩放回来，避免标点偏移
-        const k =
-          d.imgW && d.imgW !== image.naturalWidth
-            ? image.naturalWidth / d.imgW
-            : 1;
-        if (k !== 1) {
-          setPoints((ps) => ps.map((p) => ({ x: p.x * k, y: p.y * k })));
-          setTexts((ts) => ts.map((t) => ({ ...t, x: t.x * k, y: t.y * k })));
+        const lw = image.naturalWidth;
+        const lh = image.naturalHeight;
+        // 标点总是标在"当时显示的那张图"上，所以坐标通常就是当前图的像素坐标；
+        // 但历史上 imgW 可能是过期值（旧版切组后没更新图片尺寸），此时不能盲目缩放。
+        // 判据：若有点明显超出当前画布，说明坐标确实来自更大的原图空间 → 按比例缩放；
+        // 否则只把 imgW/imgH 更正为当前图尺寸，坐标保持不动。
+        const recW = d.imgW;
+        const pts = d.points ?? [];
+        const outX = pts.some((p) => p.x > lw * 1.02);
+        const outY = pts.some((p) => p.y > lh * 1.02);
+        // 只有"确实有点超出画布"才缩放；变换一律基于组里存的原始快照计算
+        // （而不是当前界面状态），因此 effect 被重复执行也不会叠加缩放
+        if (recW && recW !== lw && (outX || outY)) {
+          const k = lw / recW;
+          setPoints(pts.map((p) => ({ x: p.x * k, y: p.y * k })));
+          setTexts((d.texts ?? []).map((t) => ({ ...t, x: t.x * k, y: t.y * k })));
         }
-        setImgNatural({ w: image.naturalWidth, h: image.naturalHeight });
+        setImgNatural({ w: lw, h: lh });
+        imgLoadedRef.current = true;
         setImg(image);
         setAutoFit(true);
         loadingRef.current = false;
@@ -509,6 +520,7 @@ export default function DispersionPanel(props: { onBack: () => void }) {
   // 任何编辑都写回当前组（300ms 去抖）
   useEffect(() => {
     if (!groupId || loadingRef.current || !readyRef.current) return;
+    if (imgDataUrl && !imgLoadedRef.current) return; // 图还没就绪，别写回
     const t = window.setTimeout(() => {
       const cur = useAppStore
         .getState()
@@ -620,6 +632,7 @@ export default function DispersionPanel(props: { onBack: () => void }) {
           setImg(work);
           setImgDataUrl(dataUrl);
           setImgNatural({ w: work.naturalWidth, h: work.naturalHeight });
+          imgLoadedRef.current = true;
           setCropped(false);
           setPoints([]);
           setTexts([]);
@@ -1273,6 +1286,7 @@ export default function DispersionPanel(props: { onBack: () => void }) {
             setImg(work);
             setImgDataUrl(dataUrl);
             setImgNatural({ w: work.naturalWidth, h: work.naturalHeight });
+            imgLoadedRef.current = true;
             setEffSpec(spec);
             setCropped(true);
             setPoints([]);
