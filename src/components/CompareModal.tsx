@@ -155,7 +155,10 @@ export default function CompareModal(props: {
       open={props.open}
       onCancel={props.onClose}
       width="88%"
-      style={{ top: 32 }}
+      style={{ top: 24 }}
+      styles={{
+        body: { maxHeight: "calc(100vh - 200px)", overflowY: "auto", paddingRight: 8 },
+      }}
       footer={
         <Space style={{ width: "100%", justifyContent: "space-between" }}>
           <Button

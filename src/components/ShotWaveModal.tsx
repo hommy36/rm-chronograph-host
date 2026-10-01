@@ -248,7 +248,10 @@ export default function ShotWaveModal(props: {
         </Space>
       }
       width="80%"
-      style={{ top: 40 }}
+      style={{ top: 24 }}
+      styles={{
+        body: { maxHeight: "calc(100vh - 200px)", overflowY: "auto", paddingRight: 8 },
+      }}
     >
       {!wave ? (
         <div style={{ padding: 40, textAlign: "center", color: "#888" }}>
