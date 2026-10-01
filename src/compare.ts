@@ -2,6 +2,14 @@
 import type { Group, WaveConfig } from "./types";
 import { computeStats } from "./stats";
 import { reportShotWave } from "./wave";
+import {
+  ARMOR,
+  avgDistance,
+  hitRate,
+  meanPoint,
+  minEnclosingCircle,
+  score,
+} from "./dispersion/math";
 
 export const COMPARE_BINS = 15;
 
@@ -130,8 +138,75 @@ export function compareWheelRows(
   });
 }
 
-/** 对比结果导出 CSV */
-export function buildCompareCsv(
+/** 单组散布分析结果（落点统一到 mm，并以纸面中心为原点） */
+export interface DispersionSide {
+  hasData: boolean;
+  /** 标点数 */
+  n: number;
+  /** 相对纸面中心的落点(mm)，x 右为正，y 下为正 */
+  pointsMm: { x: number; y: number }[];
+  /** 平均环数（以各自点群中心为基准） */
+  meanRing: number | null;
+  /** 平均散布距离(mm) */
+  avgDist: number | null;
+  /** 最小包围圆半径(mm) */
+  mecRadius: number | null;
+  hitSmall: number | null;
+  hitLarge: number | null;
+  hitDart: number | null;
+}
+
+/**
+ * 把组内散布数据换算成可对比的 mm 坐标（以纸面中心为原点）。
+ * 缺少图片天然尺寸时退化为原始像素坐标（仍可看相对形状）。
+ */
+export function groupDispersion(g: Group): DispersionSide {
+  const d = g.dispersion;
+  if (!d || d.points.length === 0) {
+    return {
+      hasData: false,
+      n: 0,
+      pointsMm: [],
+      meanRing: null,
+      avgDist: null,
+      mecRadius: null,
+      hitSmall: null,
+      hitLarge: null,
+      hitDart: null,
+    };
+  }
+  const imgW = d.imgW ?? 0;
+  const imgH = d.imgH ?? 0;
+  const hasScale = imgW > 0 && imgH > 0;
+  const mmPerPx = hasScale ? d.effSpec.w / imgW : 1;
+  // 有图片尺寸时以纸面中心为原点；缺尺寸（旧数据/图片丢失）时退化到点群重心，
+  // 这样至少能对比相对散布形状，而不是把像素当毫米
+  const rawPts = d.points.map((p) => ({ ...p, x: p.x * mmPerPx, y: p.y * mmPerPx }));
+  const fallbackCenter = meanPoint(rawPts) ?? { x: 0, y: 0 };
+  const ox = hasScale ? (imgW / 2) * mmPerPx : fallbackCenter.x;
+  const oy = hasScale ? (imgH / 2) * mmPerPx : fallbackCenter.y;
+  const pointsMm = rawPts.map((p) => ({ x: p.x - ox, y: p.y - oy }));
+  const center = meanPoint(pointsMm);
+  const mec = minEnclosingCircle(pointsMm);
+  // 已换算到 mm，故 mmPerPx 传 1
+  return {
+    hasData: true,
+    n: pointsMm.length,
+    pointsMm,
+    meanRing: center ? score(pointsMm, center, 1) : null,
+    avgDist: center ? avgDistance(pointsMm, center, 1) : null,
+    mecRadius: mec ? mec.radius : null,
+    hitSmall: center ? hitRate(pointsMm, center, ARMOR.small, 1) : null,
+    hitLarge: center ? hitRate(pointsMm, center, ARMOR.large, 1) : null,
+    hitDart: center ? hitRate(pointsMm, center, ARMOR.dart, 1) : null,
+  };
+}
+
+export function compareDispersion(a: Group, b: Group): [DispersionSide, DispersionSide] {
+  return [groupDispersion(a), groupDispersion(b)];
+}
+
+/** 对比结果导出 CSV */export function buildCompareCsv(
   a: Group,
   b: Group,
   cfg: WaveConfig
@@ -175,6 +250,25 @@ export function buildCompareCsv(
     hist.centers.forEach((c, i) => {
       lines.push([c.toFixed(4), String(hist.a[i]), String(hist.b[i])].join(","));
     });
+  }
+  const [da, db] = compareDispersion(a, b);
+  if (da.hasData || db.hasData) {
+    lines.push("");
+    lines.push(`散布(靶纸),A(${cell(a.name)}),B(${cell(b.name)}),差值(B-A)`);
+    const row = (label: string, x: number | null, y: number | null, digits: number) => {
+      const diff = x !== null && y !== null ? y - x : null;
+      lines.push([cell(label), fmt(x, digits), fmt(y, digits), fmt(diff, digits)].join(","));
+    };
+    row("标点数", da.n, db.n, 0);
+    row("平均环数(以各自点群中心)", da.meanRing, db.meanRing, 3);
+    row("平均散布距离(mm)", da.avgDist, db.avgDist, 2);
+    row("最小包围圆半径(mm)", da.mecRadius, db.mecRadius, 2);
+    row("小装甲命中率(%)", da.hitSmall === null ? null : da.hitSmall * 100, db.hitSmall === null ? null : db.hitSmall * 100, 1);
+    row("大装甲命中率(%)", da.hitLarge === null ? null : da.hitLarge * 100, db.hitLarge === null ? null : db.hitLarge * 100, 1);
+    row("飞镖命中率(%)", da.hitDart === null ? null : da.hitDart * 100, db.hitDart === null ? null : db.hitDart * 100, 1);
+    lines.push("落点(mm, 以纸面中心为原点),X,Y");
+    da.pointsMm.forEach((p) => lines.push([`A(${cell(a.name)})`, p.x.toFixed(2), p.y.toFixed(2)].join(",")));
+    db.pointsMm.forEach((p) => lines.push([`B(${cell(b.name)})`, p.x.toFixed(2), p.y.toFixed(2)].join(",")));
   }
   return "\ufeff" + lines.join("\r\n") + "\r\n";
 }

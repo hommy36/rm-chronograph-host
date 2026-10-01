@@ -41,6 +41,9 @@ export interface DispersionData {
   points: Pt[];
   /** 文字标注 */
   texts: { x: number; y: number; text: string; size: number; color: string }[];
+  /** 靶纸图片原始像素尺寸（px→mm 换算用） */
+  imgW?: number;
+  imgH?: number;
   /** 更新时间 */
   updatedAt: number;
 }

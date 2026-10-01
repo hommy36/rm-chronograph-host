@@ -283,6 +283,10 @@ export default function DispersionPanel(props: { onBack: () => void }) {
   const setGroupDispersion = useAppStore((s) => s.setGroupDispersion);
   /** 当前靶纸图片的压缩 dataURL（写回组里） */
   const [imgDataUrl, setImgDataUrl] = useState<string | undefined>(undefined);
+  /** 图片原始像素尺寸：独立保存，避免图片未就绪时写回把已有标定尺寸抹掉 */
+  const [imgNatural, setImgNatural] = useState<
+    { w: number; h: number } | undefined
+  >(undefined);
   /** 正在从组数据载入，避免载入过程反过来触发写回 */
   const loadingRef = useRef(false);
 
@@ -299,6 +303,7 @@ export default function DispersionPanel(props: { onBack: () => void }) {
       setCropped(false);
     }
     setImgDataUrl(d?.imageDataUrl);
+    setImgNatural(d?.imgW && d.imgH ? { w: d.imgW, h: d.imgH } : undefined);
     if (d?.imageDataUrl) {
       const image = new Image();
       image.onload = () => {
@@ -338,12 +343,14 @@ export default function DispersionPanel(props: { onBack: () => void }) {
               effSpec: { name: effSpec.name, w: effSpec.w, h: effSpec.h },
               points,
               texts,
+              imgW: imgNatural?.w,
+              imgH: imgNatural?.h,
               updatedAt: Date.now(),
             }
       );
     }, 300);
     return () => clearTimeout(t);
-  }, [groupId, imgDataUrl, effSpec, points, texts, setGroupDispersion]);
+  }, [groupId, imgNatural, imgDataUrl, effSpec, points, texts, setGroupDispersion]);
 
   const natural = img
     ? { w: img.naturalWidth, h: img.naturalHeight }
@@ -427,6 +434,7 @@ export default function DispersionPanel(props: { onBack: () => void }) {
       image.onload = () => {
         setImg(image);
         setImgDataUrl(compressImage(image));
+        setImgNatural({ w: image.naturalWidth, h: image.naturalHeight });
         setCropped(false);
         setPoints([]);
         setTexts([]);
@@ -925,6 +933,7 @@ export default function DispersionPanel(props: { onBack: () => void }) {
         onConfirm={(image, spec) => {
           setImg(image);
           setImgDataUrl(compressImage(image));
+          setImgNatural({ w: image.naturalWidth, h: image.naturalHeight });
           setEffSpec(spec);
           setCropped(true);
           setPoints([]);

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   buildCompareCsv,
+  compareDispersion,
   compareStatsRows,
   compareWheelRows,
+  groupDispersion,
   pairedHistogram,
 } from "./compare";
 import type { Group, WaveConfig } from "./types";
@@ -104,8 +106,70 @@ describe("compareWheelRows", () => {
   });
 });
 
-describe("buildCompareCsv", () => {
-  it("包含指标、轮组与直方图分箱", () => {
+describe("groupDispersion / compareDispersion", () => {
+  /** 造一组落在 [280,220] 附近的靶纸点：A4 横向 297×210mm，图 1200×849px */
+  function withDispersion(spread: number) {
+    const g = group(1, "A", [15], null);
+    const imgW = 1200;
+    const imgH = 849;
+    const mmPerPx = 297 / imgW;
+    const cx = imgW / 2;
+    const cy = imgH / 2;
+    // 以纸面中心为原点、按 mm 偏移布置 4 个点
+    const offsets = [
+      [spread, 0],
+      [-spread, spread / 2],
+      [0, -spread],
+      [0, 0],
+    ];
+    g.dispersion = {
+      effSpec: { name: "A4·横向", w: 297, h: 210 },
+      imgW,
+      imgH,
+      points: offsets.map(([dx, dy]) => ({
+        x: cx + dx / mmPerPx,
+        y: cy + dy / mmPerPx,
+      })),
+      texts: [],
+      updatedAt: 0,
+    };
+    return g;
+  }
+
+  it("像素点换算到相对纸面中心的 mm", () => {
+    const d = groupDispersion(withDispersion(20));
+    expect(d.hasData).toBe(true);
+    expect(d.n).toBe(4);
+    // 点 0: 纸面中心右侧 20mm
+    expect(d.pointsMm[0].x).toBeCloseTo(20, 6);
+    expect(d.pointsMm[0].y).toBeCloseTo(0, 6);
+    // 点 1: 左 20mm、下 10mm
+    expect(d.pointsMm[1].x).toBeCloseTo(-20, 6);
+    expect(d.pointsMm[1].y).toBeCloseTo(10, 6);
+    // 点 2: 上 20mm
+    expect(d.pointsMm[2].y).toBeCloseTo(-20, 6);
+  });
+
+  it("散布越差，平均散布距离与包围圆越大", () => {
+    const tight = groupDispersion(withDispersion(10));
+    const loose = groupDispersion(withDispersion(40));
+    expect(loose.avgDist!).toBeGreaterThan(tight.avgDist!);
+    expect(loose.mecRadius!).toBeGreaterThan(tight.mecRadius!);
+    expect(tight.meanRing).not.toBeNull();
+    expect(tight.hitSmall).toBeGreaterThan(0);
+  });
+
+  it("没有散布数据的组返回空", () => {
+    const empty = groupDispersion(group(1, "A", [15], null));
+    expect(empty.hasData).toBe(false);
+    expect(empty.pointsMm).toHaveLength(0);
+    const [x, y] = compareDispersion(group(1, "A", [], null), group(2, "B", [], null));
+    expect(x.hasData).toBe(false);
+    expect(y.hasData).toBe(false);
+  });
+});
+
+describe("buildCompareCsv", () => {  it("包含指标、轮组与直方图分箱", () => {
     const csv = buildCompareCsv(group(1, "A", [15, 15.2], 400), group(2, "B", [15.1, 15.3], 200), CFG);
     expect(csv).toContain("指标,A(A),B(B),差值(B-A)");
     expect(csv).toContain("差值(B-A)");
