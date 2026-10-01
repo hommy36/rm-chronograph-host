@@ -2,6 +2,7 @@
 import type { Group, WaveConfig, WheelGroupCfg } from "./types";
 import { computeStats } from "./stats";
 import { reportShotWave } from "./wave";
+import { bootstrapDiff, welchTTest } from "./analysis";
 import {
   ARMOR,
   avgDistance,
@@ -20,6 +21,13 @@ export interface CompareStatsRow {
   /** b - a */
   diff: number | null;
   digits: number;
+  /** 差值 95% 置信区间（可算时才有） */
+  ciLow?: number | null;
+  ciHigh?: number | null;
+  /** 双尾 p 值 */
+  p?: number | null;
+  /** 检验方法：均值用 Welch t，极差/标准差用 bootstrap */
+  method?: "welch" | "bootstrap";
 }
 
 export function compareStatsRows(a: Group, b: Group): CompareStatsRow[] {
@@ -41,14 +49,40 @@ export function compareStatsRows(a: Group, b: Group): CompareStatsRow[] {
       digits,
     };
   };
-  return [
-    mk("样本数", (s) => s.n, 0, 0),    mk("均值 (m/s)", (s) => s.mean, 4, null),
+  const va = a.shots.map((s) => s.speed_mps);
+  const vb = b.shots.map((s) => s.speed_mps);
+  const rangeStat = (v: number[]) => Math.max(...v) - Math.min(...v);
+  const stdStat = (v: number[]) => {
+    const m = v.reduce((p, q) => p + q, 0) / v.length;
+    return Math.sqrt(
+      v.reduce((s, x) => s + (x - m) ** 2, 0) / Math.max(1, v.length - 1)
+    );
+  };
+  const rows: CompareStatsRow[] = [
+    mk("样本数", (s) => s.n, 0, 0),
+    mk("均值 (m/s)", (s) => s.mean, 4, null),
     mk("最大值 (m/s)", (s) => s.max, 3, null),
     mk("最小值 (m/s)", (s) => s.min, 3, null),
     mk("极差 (m/s)", (s) => s.range, 3, null),
     mk("方差", (s) => s.variance, 6, null),
     mk("标准差", (s) => s.std, 4, null),
   ];
+  // 显著性：均值用 Welch t 检验；极差/标准差抽样分布未知，用 bootstrap 重采样该统计量
+  for (const row of rows) {
+    let t: ReturnType<typeof welchTTest> = null;
+    if (row.label.startsWith("均值")) t = welchTTest(va, vb);
+    else if (row.label.startsWith("极差"))
+      t = bootstrapDiff(va, vb, 1000, 20261002, rangeStat);
+    else if (row.label.startsWith("标准差"))
+      t = bootstrapDiff(va, vb, 1000, 20261002, stdStat);
+    if (t) {
+      row.ciLow = t.ciLow;
+      row.ciHigh = t.ciHigh;
+      row.p = t.p;
+      row.method = t.method;
+    }
+  }
+  return rows;
 }
 
 /** 两组共用分箱的直方图（对比用） */

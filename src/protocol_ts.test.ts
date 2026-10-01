@@ -79,8 +79,9 @@ describe("stats", () => {
     expect(s.max).toBeCloseTo(15.9, 6);
     expect(s.min).toBeCloseTo(15.7, 6);
     expect(s.range).toBeCloseTo(0.2, 6);
-    expect(s.variance).toBeCloseTo(0.0056, 6);
-    expect(s.std).toBeCloseTo(Math.sqrt(0.0056), 9);
+    // 样本口径（÷(n−1)）：总体值 0.0056 → 样本值 0.0056 × 5/4
+    expect(s.variance).toBeCloseTo(0.007, 9);
+    expect(s.std).toBeCloseTo(Math.sqrt(0.007), 9);
   });
 
   it("computeStats 空数组返回 null", () => {
@@ -111,7 +112,8 @@ describe("stats", () => {
     const { ma, upper, lower } = movingAverageBand(values, 5);
     expect(ma.slice(0, 4)).toEqual([null, null, null, null]);
     expect(ma[4]).toBeCloseTo(15.78, 6);
-    expect(upper[4]!).toBeCloseTo(15.78 + Math.sqrt(0.0056), 6);
-    expect(lower[4]!).toBeCloseTo(15.78 - Math.sqrt(0.0056), 6);
+    // 窗口内同样用样本标准差（÷4）
+    expect(upper[4]!).toBeCloseTo(15.78 + Math.sqrt(0.007), 6);
+    expect(lower[4]!).toBeCloseTo(15.78 - Math.sqrt(0.007), 6);
   });
 });

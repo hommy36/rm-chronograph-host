@@ -44,6 +44,7 @@ import {
   score,
 } from "../dispersion/math";
 import type { Pt } from "../dispersion/math";
+import { dispersionGeometry } from "../analysis";
 import {
   applyHighPass,
   DEFAULT_ENHANCE,
@@ -230,6 +231,14 @@ function srcWidth(s: ImgSource): number {
   return s instanceof HTMLCanvasElement ? s.width : s.naturalWidth;
 }
 
+/** σ 椭圆参数（像素坐标） */
+interface SigmaEllipse {
+  cx: number;
+  cy: number;
+  rx: number;
+  ry: number;
+}
+
 /** 场景绘制：图像 + 弹孔 + （可选）分析叠加 + 文字（图像像素坐标系） */
 function drawScene(
   ctx: CanvasRenderingContext2D,
@@ -238,7 +247,9 @@ function drawScene(
   texts: TextMark[],
   analysis: Analysis | null,
   mmPerPx: number,
-  showOverlay: boolean
+  showOverlay: boolean,
+  /** 1σ/2σ 散布椭圆（可选叠加） */
+  sigma?: SigmaEllipse | null
 ) {
   ctx.drawImage(img, 0, 0);
   const fontPx = Math.max(12, Math.round(srcWidth(img) / 60));
@@ -256,6 +267,26 @@ function drawScene(
       ctx.fillStyle = COLORS.mec;
       ctx.fillText(String(pointRingScore(dMm)), p.x + 6, p.y - 6);
     }
+  }
+
+  if (sigma && (sigma.rx > 0 || sigma.ry > 0)) {
+    ctx.save();
+    for (const [k, dash] of [
+      [1, []],
+      [2, [8, 6]],
+    ] as [number, number[]][]) {
+      ctx.beginPath();
+      ctx.setLineDash(dash);
+      ctx.strokeStyle = "rgba(0,80,255,0.75)";
+      ctx.lineWidth = Math.max(1.5, fontPx / 12);
+      ctx.ellipse(sigma.cx, sigma.cy, sigma.rx * k, sigma.ry * k, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.font = `${fontPx * 0.8}px sans-serif`;
+    ctx.fillStyle = "rgba(0,80,255,0.9)";
+    ctx.fillText("1σ/2σ", sigma.cx + sigma.rx + 6, sigma.cy - sigma.ry * 0.5);
+    ctx.restore();
   }
 
   if (analysis && showOverlay) {
@@ -388,6 +419,7 @@ export default function DispersionPanel(props: { onBack: () => void }) {
   const [centerMode, setCenterMode] = useState<"points" | "image">("points");
   const [cropOpen, setCropOpen] = useState(false);
   const [showOverlay, setShowOverlay] = useState(false);
+  const [showSigma, setShowSigma] = useState(false);
   const [placingText, setPlacingText] = useState(false);
   const [textPopOpen, setTextPopOpen] = useState(false);
   const [enhanceOpen, setEnhanceOpen] = useState(false);
@@ -593,6 +625,18 @@ export default function DispersionPanel(props: { onBack: () => void }) {
     setAutoFit(false);
   };
 
+  /** 落点相对纸面中心的 mm 坐标 */
+  const pointsMm = useMemo(
+    () =>
+      points.map((p) => ({
+        x: (p.x - natural.w / 2) * mmPerPx,
+        y: (p.y - natural.h / 2) * mmPerPx,
+      })),
+    [points, natural.w, natural.h, mmPerPx]
+  );
+  /** 散布几何：弹着中心偏移 / Cx·Cy / R50 / 纵横比 */
+  const geo = useMemo(() => dispersionGeometry(pointsMm), [pointsMm]);
+
   const analysis = useMemo<Analysis | null>(() => {
     if (!img || points.length === 0) return null;
     const center =
@@ -618,8 +662,36 @@ export default function DispersionPanel(props: { onBack: () => void }) {
     if (!ctx) return;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, natural.w, natural.h);
-    drawScene(ctx, enhanced ?? img, points, texts, analysis, mmPerPx, showOverlay);
-  }, [img, enhanced, points, texts, analysis, natural.w, natural.h, mmPerPx, showOverlay]);
+    drawScene(
+      ctx,
+      enhanced ?? img,
+      points,
+      texts,
+      analysis,
+      mmPerPx,
+      showOverlay,
+      showSigma && analysis && geo
+        ? {
+            cx: analysis.center.x,
+            cy: analysis.center.y,
+            rx: geo.cx / mmPerPx,
+            ry: geo.cy / mmPerPx,
+          }
+        : null
+    );
+  }, [
+    img,
+    enhanced,
+    points,
+    texts,
+    analysis,
+    natural.w,
+    natural.h,
+    mmPerPx,
+    showOverlay,
+    showSigma,
+    geo,
+  ]);
 
   const loadFile = (file: File) => {
     const reader = new FileReader();
@@ -705,7 +777,23 @@ export default function DispersionPanel(props: { onBack: () => void }) {
       off.width = natural.w;
       off.height = natural.h;
       const ctx = off.getContext("2d")!;
-      drawScene(ctx, enhanced ?? img, points, texts, analysis, mmPerPx, showOverlay);
+      drawScene(
+        ctx,
+        enhanced ?? img,
+        points,
+        texts,
+        analysis,
+        mmPerPx,
+        showOverlay,
+        showSigma && analysis && geo
+          ? {
+              cx: analysis.center.x,
+              cy: analysis.center.y,
+              rx: geo.cx / mmPerPx,
+              ry: geo.cy / mmPerPx,
+            }
+          : null
+      );
       const dataUrl = off.toDataURL("image/png");
       const base64 = dataUrl.split(",")[1];
       const path = await save({
@@ -1073,6 +1161,17 @@ export default function DispersionPanel(props: { onBack: () => void }) {
             <span style={{ fontSize: 12, color: "#888" }}>分析叠加</span>
           </Space>
         </Tooltip>
+        <Tooltip title="以弹着中心为中心画 1σ / 2σ 椭圆（半轴为水平/垂直标准差），看散布形状">
+          <Space size={4}>
+            <Switch
+              size="small"
+              checked={showSigma}
+              onChange={setShowSigma}
+              disabled={!analysis || !geo}
+            />
+            <span style={{ fontSize: 12, color: "#888" }}>σ 椭圆</span>
+          </Space>
+        </Tooltip>
         <Popover
           content={textControls}
           trigger="click"
@@ -1248,6 +1347,45 @@ export default function DispersionPanel(props: { onBack: () => void }) {
             value={analysis ? (analysis.mec.radius * mmPerPx).toFixed(1) : "-"}
             unit="mm"
           />
+          <MetricRow
+            label="R50（半数落点半径）"
+            color={COLORS.mec}
+            value={geo ? geo.r50.toFixed(2) : "-"}
+            unit="mm"
+          />
+          <MetricRow
+            label="水平/垂直散布 Cx·Cy"
+            color={COLORS.mec}
+            value={geo ? `${geo.cx.toFixed(1)} / ${geo.cy.toFixed(1)}` : "-"}
+            unit="mm"
+          />
+          <MetricRow
+            label="纵横比"
+            color={COLORS.mec}
+            value={geo ? geo.aspect.toFixed(2) : "-"}
+            unit=""
+          />
+          <MetricRow
+            label="弹着中心偏移"
+            color={COLORS.center}
+            value={geo ? geo.dist.toFixed(1) : "-"}
+            unit="mm"
+          />
+          {geo && (
+            <div
+              style={{
+                fontSize: 12,
+                color: "#666",
+                padding: "2px 0 6px 6px",
+                lineHeight: 1.6,
+              }}
+            >
+              方向：{geo.dx >= 0 ? "右" : "左"}
+              {Math.abs(geo.dx).toFixed(1)} · {geo.dy >= 0 ? "下" : "上"}
+              {Math.abs(geo.dy).toFixed(1)} mm（{geo.angleDeg.toFixed(0)}
+              °，0°=正右，90°=正下）
+            </div>
+          )}
           <Divider style={{ margin: "8px 0" }} />
           <div style={{ fontSize: 12, color: "#999", marginBottom: 2 }}>
             装甲命中率

@@ -166,21 +166,24 @@ export function buildAllGroupsCsv(
   return BOM + lines.join("\r\n") + "\r\n";
 }
 
-/** 保存 CSV：Tauri 环境走保存对话框 + Rust 写盘；纯浏览器环境退回下载 */
-export async function saveCsv(
+/** 保存文本文件（保存对话框 + 写盘；浏览器环境退回下载） */
+export async function saveText(
   defaultName: string,
-  contents: string
+  contents: string,
+  filterName: string,
+  ext: string,
+  mime = "text/plain;charset=utf-8"
 ): Promise<boolean> {
   if (isTauri()) {
     const path = await save({
       defaultPath: defaultName,
-      filters: [{ name: "CSV", extensions: ["csv"] }],
+      filters: [{ name: filterName, extensions: [ext] }],
     });
     if (!path) return false; // 用户取消
     await writeTextFile(path, contents);
     return true;
   }
-  const blob = new Blob([contents], { type: "text/csv;charset=utf-8" });
+  const blob = new Blob([contents], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -188,4 +191,12 @@ export async function saveCsv(
   a.click();
   URL.revokeObjectURL(url);
   return true;
+}
+
+/** 保存 CSV */
+export async function saveCsv(
+  defaultName: string,
+  contents: string
+): Promise<boolean> {
+  return saveText(defaultName, contents, "CSV", "csv", "text/csv;charset=utf-8");
 }

@@ -1,4 +1,7 @@
-/** 统计计算（纯函数，vitest 覆盖）。方差为总体方差（÷n），与 TJSP 图 37 口径一致。 */
+/**
+ * 统计计算（纯函数，vitest 覆盖）。
+ * 方差/标准差为**样本口径**（÷(n−1)），与 Excel 的 VAR.S/STDEV.S、论文常用口径一致。
+ */
 
 export interface Stats {
   n: number;
@@ -7,9 +10,9 @@ export interface Stats {
   min: number;
   /** 极差 = max - min */
   range: number;
-  /** 总体方差 */
+  /** 样本方差（÷(n−1)）；n=1 时为 0 */
   variance: number;
-  /** 总体标准差 */
+  /** 样本标准差（÷(n−1)）；n=1 时为 0 */
   std: number;
 }
 
@@ -19,7 +22,8 @@ export function computeStats(values: number[]): Stats | null {
   const mean = values.reduce((a, b) => a + b, 0) / n;
   const max = Math.max(...values);
   const min = Math.min(...values);
-  const variance = values.reduce((a, b) => a + (b - mean) ** 2, 0) / n;
+  const variance =
+    n > 1 ? values.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1) : 0;
   return { n, mean, max, min, range: max - min, variance, std: Math.sqrt(variance) };
 }
 
@@ -69,7 +73,10 @@ export function movingAverageBand(values: number[], window = 5): MovingBand {
   for (let i = window - 1; i < values.length; i++) {
     const slice = values.slice(i - window + 1, i + 1);
     const m = slice.reduce((a, b) => a + b, 0) / window;
-    const sd = Math.sqrt(slice.reduce((a, b) => a + (b - m) ** 2, 0) / window);
+    // 与全局口径一致：窗口内按样本标准差（÷(window−1)）
+    const sd = Math.sqrt(
+      slice.reduce((a, b) => a + (b - m) ** 2, 0) / Math.max(1, window - 1)
+    );
     ma[i] = m;
     upper[i] = m + sd;
     lower[i] = m - sd;

@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { Button, Card, Col, Row, Space, Statistic } from "antd";
-import { AimOutlined, UnorderedListOutlined } from "@ant-design/icons";
+import { AimOutlined, FundViewOutlined, UnorderedListOutlined } from "@ant-design/icons";
 import { useAppStore } from "../store";
 import { computeStats } from "../stats";
 import type { MainView } from "../types";
@@ -15,8 +15,8 @@ const items: {
   { title: "最大值", get: (s) => s.max, precision: 3 },
   { title: "最小值", get: (s) => s.min, precision: 3 },
   { title: "极差", get: (s) => s.range, precision: 3 },
-  { title: "方差", get: (s) => s.variance, precision: 6 },
-  { title: "标准差", get: (s) => s.std, precision: 4 },
+  { title: "方差 (样本)", get: (s) => s.variance, precision: 6 },
+  { title: "标准差 (样本)", get: (s) => s.std, precision: 4 },
 ];
 
 interface StatsCardsProps {
@@ -58,6 +58,14 @@ export default function StatsCards({ view, onChangeView }: StatsCardsProps) {
             }
           >
             {view === "dispersion" ? "收起散布分析" : "散布分析"}
+          </Button>
+          <Button
+            size="small"
+            icon={<FundViewOutlined />}
+            disabled={groups.length === 0}
+            onClick={() => onChangeView(view === "overview" ? "charts" : "overview")}
+          >
+            {view === "overview" ? "收起测试总览" : "测试总览"}
           </Button>
         </Space>
       }

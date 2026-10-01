@@ -14,6 +14,7 @@ import ChartsGrid from "./components/ChartsGrid";
 import StatsCards from "./components/StatsCards";
 import ShotsTable from "./components/ShotsTable";
 import DispersionPanel from "./components/DispersionPanel";
+import OverviewPanel from "./components/OverviewPanel";
 import type { MainView } from "./types";
 import "./App.css";
 
@@ -241,6 +242,11 @@ export default function App() {
               {view === "dispersion" && (
                 <div className="details-overlay">
                   <DispersionPanel onBack={() => setView("charts")} />
+                </div>
+              )}
+              {view === "overview" && (
+                <div className="details-overlay">
+                  <OverviewPanel />
                 </div>
               )}
             </div>

@@ -365,7 +365,18 @@ export default function CompareModal(props: {
               <ReactECharts option={histOption} style={{ height: 260 }} notMerge />
             </Card>
           </div>
-          <Card size="small" title="统计指标对比" styles={{ body: { padding: 0 } }}>
+          <Card
+            size="small"
+            title={
+              <Space size={8}>
+                <span>统计指标对比</span>
+                <span style={{ fontSize: 12, color: "#999", fontWeight: 400 }}>
+                  均值差用 Welch t 检验；极差/标准差用 bootstrap 重采样
+                </span>
+              </Space>
+            }
+            styles={{ body: { padding: 0 } }}
+          >
             <Table
               size="small"
               rowKey="label"
@@ -404,6 +415,37 @@ export default function CompareModal(props: {
                       >
                         {v > 0 ? "+" : ""}
                         {v.toFixed(r.digits)}
+                      </span>
+                    ),
+                },
+                {
+                  title: "95% 置信区间",
+                  dataIndex: "ciLow",
+                  width: 200,
+                  render: (v: number | null | undefined, r) =>
+                    v === null || v === undefined ? (
+                      "-"
+                    ) : (
+                      <span style={{ fontSize: 12, color: "#666" }}>
+                        {v.toFixed(r.digits)} ~ {(r.ciHigh ?? 0).toFixed(r.digits)}
+                      </span>
+                    ),
+                },
+                {
+                  title: "p 值",
+                  dataIndex: "p",
+                  width: 90,
+                  render: (v: number | null | undefined) =>
+                    v === null || v === undefined ? (
+                      "-"
+                    ) : (
+                      <span
+                        style={{
+                          fontWeight: v < 0.05 ? 700 : 400,
+                          color: v < 0.05 ? "#fa541c" : "#888",
+                        }}
+                      >
+                        {v < 0.001 ? "<0.001" : v.toFixed(3)}
                       </span>
                     ),
                 },

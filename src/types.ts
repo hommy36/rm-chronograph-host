@@ -91,8 +91,8 @@ export const EMPTY_PARAMS: GroupParams = {
   note: "",
 };
 
-/** 主区视图：图表 / 弹速明细 / 散布分析 */
-export type MainView = "charts" | "details" | "dispersion";
+/** 主区视图：图表 / 弹速明细 / 散布分析 / 测试总览 */
+export type MainView = "charts" | "details" | "dispersion" | "overview";
 
 /** 摩擦轮分组配置：一个通道组对应一组同工况摩擦轮（如 3+3 六摩擦轮） */
 export interface WheelGroupCfg {
