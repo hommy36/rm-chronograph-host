@@ -214,6 +214,28 @@ describe("equalScaleRanges", () => {
   });
 });
 
+describe("compareWheelRows 两组各用自己的通道分配", () => {
+  it("轮组按名字对齐，缺失一侧留空", () => {
+    const a = group(1, "A", [15, 15], 400);
+    const b = group(2, "B", [15, 15], 200);
+    const cfgA: WaveConfig = {
+      groups: [{ id: 1, name: "一级", channels: [0, 2] }],
+      channelLabels: {},
+    };
+    const cfgB: WaveConfig = {
+      groups: [{ id: 1, name: "一级", channels: [0, 2] }, { id: 2, name: "二级", channels: [1, 3] }],
+      channelLabels: {},
+    };
+    const rows = compareWheelRows(a, b, cfgA, cfgB);
+    expect(rows.map((r) => r.name)).toEqual(["一级", "二级"]);
+    expect(rows[0].aDrop).not.toBeNull();
+    expect(rows[0].bDrop).not.toBeNull();
+    // B 侧没有"二级"以外的问题：A 侧没有二级 → aDrop 为空
+    expect(rows[1].aDrop).toBeNull();
+    expect(rows[1].bDrop).not.toBeNull();
+  });
+});
+
 describe("buildCompareCsv", () => {  it("包含指标、轮组与直方图分箱", () => {
     const csv = buildCompareCsv(group(1, "A", [15, 15.2], 400), group(2, "B", [15.1, 15.3], 200), CFG);
     expect(csv).toContain("指标,A(A),B(B),差值(B-A)");

@@ -129,6 +129,28 @@ describe("会话序列化", () => {
     expect(d.effSpec.w).toBe(297);
   });
 
+  it("组的波形通道分配随组往返（且不影响全局默认）", () => {
+    const g = group(1, "组1", false);
+    g.waveConfig = {
+      groups: [{ id: 1, name: "一级", channels: [0, 2, 4] }],
+      channelLabels: { 0: "一1", 2: "一2", 4: "一3" },
+      channelCount: 14,
+    };
+    const text = JSON.stringify(
+      serializeSession({
+        groups: [g],
+        nextGroupId: 2,
+        targetShots: 100,
+        waveConfig: { groups: [], channelLabels: {} },
+      })
+    );
+    const back = deserializeSession(text);
+    expect(back.groups[0].waveConfig?.groups[0].channels).toEqual([0, 2, 4]);
+    expect(back.groups[0].waveConfig?.channelCount).toBe(14);
+    // 全局默认仍是传进去的那份，没被组配置污染
+    expect(back.waveConfig.groups).toHaveLength(0);
+  });
+
   it("旧文件无散布字段不报错", () => {
     const text = JSON.stringify({
       version: 1,

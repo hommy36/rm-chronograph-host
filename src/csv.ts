@@ -1,6 +1,7 @@
 import { save } from "@tauri-apps/plugin-dialog";
 import { isTauri, writeTextFile } from "./api";
 import type { Group, WaveConfig } from "./types";
+import { effectiveWaveConfig, EMPTY_WAVE_CONFIG } from "./types";
 import { computeStats } from "./stats";
 import { reportShotWave } from "./wave";
 
@@ -86,14 +87,18 @@ export function buildGroupCsv(group: Group, waveCfg?: WaveConfig | null): string
 }
 
 /** 全部组汇总 CSV：每组一行统计结果，对应 TJSP 逐组对比表。
- *  传入 waveCfg 时追加各轮组的平均掉速%与平均轮间差。 */
+ *  传入 waveCfg（全局默认）时追加各轮组的平均掉速%与平均轮间差；
+ *  每个组优先用自己保存的通道分配。 */
 export function buildAllGroupsCsv(
   groups: Group[],
   waveCfg?: WaveConfig | null
 ): string {
+  const firstCfg = groups.length
+    ? effectiveWaveConfig(groups[0], waveCfg ?? EMPTY_WAVE_CONFIG)
+    : null;
   const waveCols =
-    waveCfg != null
-      ? waveCfg.groups.flatMap((g) => [`${g.name}平均掉速%`, `${g.name}平均轮间差`])
+    firstCfg != null
+      ? firstCfg.groups.flatMap((g) => [`${g.name}平均掉速%`, `${g.name}平均轮间差`])
       : [];
   const lines = [
     [
@@ -115,6 +120,7 @@ export function buildAllGroupsCsv(
     ].join(","),
   ];
   for (const g of groups) {
+    const cfgOf = effectiveWaveConfig(g, waveCfg ?? EMPTY_WAVE_CONFIG);
     const st = computeStats(g.shots.map((s) => s.speed_mps));
     const p = g.params;
     const cells = [
@@ -136,12 +142,12 @@ export function buildAllGroupsCsv(
     if (waveCfg != null) {
       const reps = g.shots
         .filter((s) => s.wave)
-        .map((s) => reportShotWave(s.wave!, waveCfg));
+        .map((s) => reportShotWave(s.wave!, cfgOf));
       for (let gi = 0; gi < waveCfg.groups.length; gi++) {
         const drops: number[] = [];
         const spreads: number[] = [];
         for (const rep of reps) {
-          for (const ch of waveCfg.groups[gi].channels) {
+          for (const ch of (cfgOf.groups[gi]?.channels ?? [])) {
             const m = rep.channelMetrics[ch];
             if (m) drops.push(m.dropPct);
           }

@@ -78,6 +78,8 @@ export interface Group {
   shots: Shot[];
   /** 该组的散布分析（靶纸）数据 */
   dispersion?: DispersionData;
+  /** 该组自己的波形通道分配（缺省用全局默认配置） */
+  waveConfig?: WaveConfig;
 }
 
 export const EMPTY_PARAMS: GroupParams = {
@@ -105,6 +107,16 @@ export interface WaveConfig {
   groups: WheelGroupCfg[];
   /** 每个通道的显示名，缺省为 "通道N" */
   channelLabels: Record<number, string>;
+  /** 手动指定 JustFloat 通道数（不填 = 用自动识别的） */
+  channelCount?: number;
 }
 
 export const EMPTY_WAVE_CONFIG: WaveConfig = { groups: [], channelLabels: {} };
+
+/** 取某组实际生效的波形配置：组内有自己的配置就用它，否则用全局默认 */
+export function effectiveWaveConfig(
+  group: { waveConfig?: WaveConfig } | null | undefined,
+  fallback: WaveConfig
+): WaveConfig {
+  return group?.waveConfig ?? fallback;
+}

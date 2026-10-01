@@ -1,5 +1,5 @@
 /** 两组测试对比: 统计指标并排、共享分箱直方图、摩擦轮指标并排（纯计算, 可测） */
-import type { Group, WaveConfig } from "./types";
+import type { Group, WaveConfig, WheelGroupCfg } from "./types";
 import { computeStats } from "./stats";
 import { reportShotWave } from "./wave";
 import {
@@ -96,38 +96,57 @@ export interface WheelCompareRow {
   bShots: number;
 }
 
-/** 摩擦轮指标并排: 各轮组的平均掉速% 与平均轮间差 */
+/**
+ * 摩擦轮指标并排: 各轮组的平均掉速% 与平均轮间差。
+ * 两组可以各有自己的轮组分配（cfgA/cfgB），轮组按名字对齐。
+ */
 export function compareWheelRows(
   a: Group,
   b: Group,
-  cfg: WaveConfig
+  cfgA: WaveConfig,
+  cfgB: WaveConfig = cfgA
 ): WheelCompareRow[] {
-  const agg = (g: Group) => {
+  const repsOf = (g: Group, cfg: WaveConfig) => {
     const reps = g.shots.filter((s) => s.wave).map((s) => reportShotWave(s.wave!, cfg));
     return { reps, n: reps.length };
   };
-  const A = agg(a);
-  const B = agg(b);
+  const names: string[] = [];
+  for (const n of [
+    ...cfgA.groups.map((g) => g.name),
+    ...cfgB.groups.map((g) => g.name),
+  ]) {
+    if (!names.includes(n)) names.push(n);
+  }
   const mean = (arr: number[]) =>
     arr.length > 0 ? arr.reduce((x, y) => x + y, 0) / arr.length : null;
-  return cfg.groups.map((group, gi) => {
-    const collect = (reps: ReturnType<typeof reportShotWave>[]) => {
-      const drops: number[] = [];
-      const spreads: number[] = [];
-      for (const rep of reps) {
-        for (const ch of group.channels) {
-          const m = rep.channelMetrics[ch];
-          if (m) drops.push(m.dropPct);
-        }
-        const sp = rep.groupSpreads[gi]?.spread;
-        if (sp != null) spreads.push(sp);
+  const A = repsOf(a, cfgA);
+  const B = repsOf(b, cfgB);
+  const side = (
+    g: WheelGroupCfg | undefined,
+    cfg: WaveConfig,
+    data: { reps: ReturnType<typeof reportShotWave>[]; n: number }
+  ) => {
+    if (!g) return { drop: null, spread: null };
+    const idx = cfg.groups.indexOf(g);
+    const drops: number[] = [];
+    const spreads: number[] = [];
+    for (const rep of data.reps) {
+      for (const ch of g.channels) {
+        const m = rep.channelMetrics[ch];
+        if (m) drops.push(m.dropPct);
       }
-      return { drop: mean(drops), spread: mean(spreads) };
-    };
-    const ca = collect(A.reps);
-    const cb = collect(B.reps);
+      const sp = rep.groupSpreads[idx]?.spread;
+      if (sp != null) spreads.push(sp);
+    }
+    return { drop: mean(drops), spread: mean(spreads) };
+  };
+  return names.map((name) => {
+    const ga = cfgA.groups.find((g) => g.name === name);
+    const gb = cfgB.groups.find((g) => g.name === name);
+    const ca = side(ga, cfgA, A);
+    const cb = side(gb, cfgB, B);
     return {
-      name: group.name,
+      name,
       aDrop: ca.drop,
       bDrop: cb.drop,
       aSpread: ca.spread,
@@ -249,7 +268,8 @@ export function recenterToMean(points: { x: number; y: number }[]): {
 /** 对比结果导出 CSV */export function buildCompareCsv(
   a: Group,
   b: Group,
-  cfg: WaveConfig
+  cfgA: WaveConfig,
+  cfgB: WaveConfig = cfgA
 ): string {
   const cell = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
   const fmt = (v: number | null, digits: number) =>
@@ -263,7 +283,7 @@ export function recenterToMean(points: { x: number; y: number }[]): {
   for (const r of compareStatsRows(a, b)) {
     lines.push([cell(r.label), fmt(r.a, r.digits), fmt(r.b, r.digits), fmt(r.diff, r.digits)].join(","));
   }
-  const wheels = compareWheelRows(a, b, cfg);
+  const wheels = compareWheelRows(a, b, cfgA, cfgB);
   if (wheels.length > 0) {
     lines.push("");
     lines.push("轮组,指标,A,B,差值(B-A)");

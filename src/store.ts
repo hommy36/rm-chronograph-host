@@ -111,6 +111,8 @@ interface AppState {
   deleteGroup: (id: number) => void;
   /** 写入/清空某组的散布分析数据 */
   setGroupDispersion: (id: number, data: DispersionData | undefined) => void;
+  /** 写入某组的波形通道分配（随组保存） */
+  setGroupWaveConfig: (id: number, cfg: WaveConfig) => void;
 }
 
 function makeGroup(id: number, name: string, params: GroupParams): Group {
@@ -386,5 +388,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   setGroupDispersion: (id, data) =>
     set((s) => ({
       groups: s.groups.map((g) => (g.id === id ? { ...g, dispersion: data } : g)),
+    })),
+
+  setGroupWaveConfig: (id, cfg) =>
+    set((s) => ({
+      groups: s.groups.map((g) => (g.id === id ? { ...g, waveConfig: cfg } : g)),
     })),
 }));

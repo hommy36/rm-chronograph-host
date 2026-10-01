@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Button, Card, Input, Modal, Select, Space, Tag, Tooltip } from "antd";
+import { Button, Card, Input, InputNumber, Modal, Select, Space, Tag, Tooltip } from "antd";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import { useAppStore } from "../store";
 import type { WaveConfig, WheelGroupCfg } from "../types";
@@ -23,18 +23,25 @@ export default function WaveSettingsModal(props: {
   onClose: () => void;
 }) {
   const waveChannelCount = useAppStore((s) => s.waveChannelCount);
-  const saved = useAppStore((s) => s.waveConfig);
+  const globalCfg = useAppStore((s) => s.waveConfig);
+  const group = useAppStore(
+    (s) => s.groups.find((g) => g.id === s.viewingGroupId) ?? null
+  );
   const setWaveConfig = useAppStore((s) => s.setWaveConfig);
+  const setGroupWaveConfig = useAppStore((s) => s.setGroupWaveConfig);
 
-  // 打开时把当前配置拷进本地草稿
-  const [draft, setDraft] = useState<WaveConfig>(saved);
+  // 当前组有自己的分配就用它，否则从全局默认起步；保存回当前组
+  const target = group;
+  const [draft, setDraft] = useState<WaveConfig>(globalCfg);
   const [prevOpen, setPrevOpen] = useState(false);
   if (props.open !== prevOpen) {
     setPrevOpen(props.open);
     if (props.open) {
+      const src = target?.waveConfig ?? globalCfg;
       setDraft({
-        groups: saved.groups.map((g) => ({ ...g, channels: [...g.channels] })),
-        channelLabels: { ...saved.channelLabels },
+        groups: src.groups.map((g) => ({ ...g, channels: [...g.channels] })),
+        channelLabels: { ...src.channelLabels },
+        channelCount: src.channelCount,
       });
     }
   }
@@ -45,7 +52,7 @@ export default function WaveSettingsModal(props: {
     for (const g of draft.groups) {
       for (const c of g.channels) if (c > maxUsed) maxUsed = c;
     }
-    const n = Math.max(waveChannelCount, maxUsed + 1, 8);
+    const n = Math.max(draft.channelCount ?? 0, waveChannelCount, maxUsed + 1, 8);
     return Array.from({ length: n }, (_, i) => ({
       value: i,
       label: `通道 ${i}`,
@@ -163,14 +170,25 @@ export default function WaveSettingsModal(props: {
         .filter((g) => g.channels.length > 0)
         .map((g) => ({ ...g })),
       channelLabels: { ...draft.channelLabels },
+      channelCount: draft.channelCount,
     };
-    setWaveConfig(cfg);
+    if (target) setGroupWaveConfig(target.id, cfg);
+    else setWaveConfig(cfg);
     props.onClose();
   };
 
   return (
     <Modal
-      title="波形通道设置"
+      title={
+        <Space size={8}>
+          <span>波形通道设置</span>
+          {target ? (
+            <Tag color="blue">记录到：{target.name}</Tag>
+          ) : (
+            <Tag>全局默认（未选择组）</Tag>
+          )}
+        </Space>
+      }
       open={props.open}
       onCancel={props.onClose}
       onOk={handleSave}
@@ -188,7 +206,30 @@ export default function WaveSettingsModal(props: {
             <Tag>未识别（连接波形口后自动识别）</Tag>
           )}
           给每个摩擦轮选它对应的 JustFloat 通道；同一组内的轮子会算组内轮间差。
+          <br />
+          没连调试器也能配：手动填一个通道数量即可。
         </div>
+
+        <Space size={8}>
+          <span style={{ fontSize: 12, color: "#888" }}>通道数量</span>
+          <InputNumber
+            size="small"
+            min={1}
+            max={64}
+            style={{ width: 110 }}
+            placeholder="自动识别"
+            value={draft.channelCount}
+            onChange={(v) =>
+              setDraft((d) => ({
+                ...d,
+                channelCount: v === null ? undefined : Number(v),
+              }))
+            }
+          />
+          <span style={{ fontSize: 12, color: "#999" }}>
+            留空 = 用自动识别到的通道数
+          </span>
+        </Space>
 
         <Space wrap>
           <span style={{ color: "#888" }}>快捷预设：</span>

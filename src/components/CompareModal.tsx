@@ -37,7 +37,7 @@ export default function CompareModal(props: {
 }) {
   const groups = useAppStore((s) => s.groups);
   const compareIds = useAppStore((s) => s.compareIds);
-  const waveConfig = useAppStore((s) => s.waveConfig);
+  const globalWaveConfig = useAppStore((s) => s.waveConfig);
   const clearCompare = useAppStore((s) => s.clearCompare);
 
   const a = groups.find((g) => g.id === compareIds[0]) ?? null;
@@ -47,9 +47,13 @@ export default function CompareModal(props: {
     () => (a && b ? compareStatsRows(a, b) : []),
     [a, b]
   );
+  // 两组可以各有自己的轮组分配
+  const cfgA = a?.waveConfig ?? globalWaveConfig;
+  const cfgB = b?.waveConfig ?? globalWaveConfig;
   const wheelRows = useMemo(
-    () => (a && b ? compareWheelRows(a, b, waveConfig) : []),
-    [a, b, waveConfig]
+    () => (a && b ? compareWheelRows(a, b, cfgA, cfgB) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [a, b, cfgA, cfgB]
   );
 
   const [alignCenters, setAlignCenters] = useState(true);
@@ -282,7 +286,7 @@ export default function CompareModal(props: {
     try {
       const ok = await saveCsv(
         `对比_${a.name}_vs_${b.name}.csv`,
-        buildCompareCsv(a, b, waveConfig)
+        buildCompareCsv(a, b, cfgA, cfgB)
       );
       if (ok) message.success("对比结果已导出");
     } catch (e) {

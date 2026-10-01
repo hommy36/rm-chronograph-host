@@ -56,6 +56,8 @@ interface SerializedGroup {
   shots: SerializedShot[];
   /** 散布分析数据（含压缩后的靶纸图片 dataURL），原样存 */
   dispersion?: DispersionData;
+  /** 该组的波形通道分配 */
+  waveConfig?: WaveConfig;
 }
 
 export interface SessionFile {
@@ -84,6 +86,7 @@ export function serializeSession(s: {
       name: g.name,
       params: { ...g.params },
       startedAt: g.startedAt,
+      waveConfig: g.waveConfig,
       dispersion: g.dispersion ? { ...g.dispersion, points: [...g.dispersion.points], texts: [...g.dispersion.texts] } : undefined,
       shots: g.shots.map((shot) => {
         const out: SerializedShot = {
@@ -121,6 +124,7 @@ export function deserializeSession(text: string): {
     name: g.name,
     params: { ...g.params },
     startedAt: g.startedAt,
+    waveConfig: g.waveConfig,
     dispersion: g.dispersion
       ? ({
           ...g.dispersion,

@@ -45,7 +45,9 @@ export default function ShotWaveModal(props: {
   onClose: () => void;
   onNavigate: (idx: number) => void;
 }) {
-  const waveConfig = useAppStore((s) => s.waveConfig);
+  const globalWaveConfig = useAppStore((s) => s.waveConfig);
+  const groupWaveConfig = props.group.waveConfig;
+  const waveConfig = groupWaveConfig ?? globalWaveConfig;
   const [smoothWin, setSmoothWin] = useState(9);
   const [showRaw, setShowRaw] = useState(false);
 

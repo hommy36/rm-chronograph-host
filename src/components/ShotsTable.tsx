@@ -30,6 +30,7 @@ export default function ShotsTable() {
     setExporting(true);
     // 让出一帧让 loading 状态先渲染，再做同步的 CSV 构建
     await new Promise((r) => setTimeout(r, 0));
+    // 单组导出用该组自己的通道分配；汇总导出按组分别解析
     const cfg = withWave ? waveConfig : null;
     try {
       if (all) {
@@ -43,7 +44,7 @@ export default function ShotsTable() {
         if (!group) return;
         const ok = await saveCsv(
           `${group.name}_明细.csv`,
-          buildGroupCsv(group, cfg)
+          buildGroupCsv(group, withWave ? (group.waveConfig ?? waveConfig) : null)
         );
         if (ok) message.success(`已导出 ${group.name}`);
       }
