@@ -180,7 +180,9 @@ export default function App() {
   }, []);
 
   return (
-    <Layout style={{ minHeight: "100vh" }}>
+    // 固定视口高度、整页不滚动：所有超出都交给各区域内滚，
+    // 避免窗口最大化/还原后整页被滚动、元素跑到视口外
+    <Layout style={{ height: "100vh", overflow: "hidden" }}>
       <Header
         style={{
           background: "#fff",
@@ -188,6 +190,7 @@ export default function App() {
           boxShadow: "0 1px 4px rgba(0,21,41,0.08)",
           zIndex: 1,
           height: "auto",
+          flexShrink: 0,
           padding: 0,
           lineHeight: "normal",
         }}
@@ -210,12 +213,15 @@ export default function App() {
           <WindowControls />
         </div>
       </Header>
-      <Layout style={{ flexDirection: "row" }}>
+      <Layout
+        style={{ flexDirection: "row", flex: 1, minHeight: 0, overflow: "hidden" }}
+      >
         <div
           style={{
             width: 340,
             flexShrink: 0,
             minHeight: 0,
+            overflow: "hidden",
             background: "#f0f2f5",
             padding: "12px 6px 12px 12px",
             display: "flex",
@@ -229,6 +235,8 @@ export default function App() {
           style={{
             padding: "12px 12px 12px 6px",
             overflow: "auto",
+            minWidth: 0,
+            minHeight: 0,
             display: "flex",
             flexDirection: "column",
           }}

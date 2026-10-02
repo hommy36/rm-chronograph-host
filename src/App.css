@@ -8,8 +8,16 @@
   box-sizing: border-box;
 }
 
+/* 固定视口：整页不出现滚动条（否则窗口缩放后元素会跟着页面偏移） */
+html,
+body,
+#root {
+  height: 100%;
+}
+
 body {
   margin: 0;
+  overflow: hidden;
 }
 
 .main-content-stack {
@@ -24,7 +32,7 @@ body {
 .charts-area {
   position: relative;
   flex: 1;
-  min-height: 560px;
+  min-height: 420px;
 }
 
 /* 弹速明细覆盖层：直接盖住下方所有图表，图表保持挂载、数据不丢 */

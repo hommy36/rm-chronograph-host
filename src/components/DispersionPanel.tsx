@@ -25,6 +25,7 @@ import {
   ExpandOutlined,
   FileImageOutlined,
   FileTextOutlined,
+  QuestionCircleOutlined,
   ScissorOutlined,
   SettingOutlined,
   UndoOutlined,
@@ -242,7 +243,7 @@ interface SigmaEllipse {
 }
 
 /** 分析叠加里可单独开关的图层 */
-export type OverlayLayer =
+type OverlayLayer =
   | "ringScore"
   | "center"
   | "rings"
@@ -251,9 +252,9 @@ export type OverlayLayer =
   | "dart"
   | "mec";
 
-export type OverlayFlags = Record<OverlayLayer, boolean>;
+type OverlayFlags = Record<OverlayLayer, boolean>;
 
-export const OVERLAY_LAYERS: {
+const OVERLAY_LAYERS: {
   key: OverlayLayer;
   label: string;
   color?: string;
@@ -272,7 +273,7 @@ export const OVERLAY_LAYERS: {
   { key: "mec", label: "最小包围圆", color: COLORS.mec, hint: "包住全部弹孔的最小圆" },
 ];
 
-export const DEFAULT_OVERLAY: OverlayFlags = {
+const DEFAULT_OVERLAY: OverlayFlags = {
   ringScore: true,
   center: true,
   rings: true,
@@ -412,33 +413,45 @@ function MetricRow(props: {
   value: string;
   unit?: string;
   color: string;
+  /** 悬浮说明：解释文字收进 tooltip，面板里只留标签，省横向空间 */
+  hint?: string;
 }) {
+  const body = (
+    <Space size={6}>
+      <span
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: 4,
+          background: props.color,
+          display: "inline-block",
+        }}
+      />
+      <span style={{ fontSize: 12, color: "#666", whiteSpace: "nowrap" }}>
+        {props.label}
+      </span>
+      {props.hint && (
+        <QuestionCircleOutlined style={{ fontSize: 11, color: "#bbb" }} />
+      )}
+    </Space>
+  );
   return (
     <div
       style={{
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
+        gap: 8,
         padding: "5px 0",
       }}
     >
-      <Space size={6}>
-        <span
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: 4,
-            background: props.color,
-            display: "inline-block",
-          }}
-        />
-        <span style={{ fontSize: 12, color: "#666" }}>{props.label}</span>
-      </Space>
+      {props.hint ? <Tooltip title={props.hint}>{body}</Tooltip> : body}
       <span
         style={{
           fontSize: 15,
           fontWeight: 600,
           fontVariantNumeric: "tabular-nums",
+          whiteSpace: "nowrap",
         }}
       >
         {props.value}
@@ -638,23 +651,29 @@ export default function DispersionPanel(props: { onBack: () => void }) {
     : { w: 0, h: 0 };
   const mmPerPx = natural.w > 0 ? effSpec.w / natural.w : 0;
 
-  // 适应模式：按容器实时计算显示尺寸（允许放大），容器变化时跟随
+  // 适应模式：按容器实时计算显示尺寸（允许放大）
+  // 容器 ResizeObserver + 窗口 resize 双保险；改窗口途中可能量到 0 或极小值，
+  // 这种异常测量直接跳过，避免把错误的比例存进 state 导致画面位置不对
   useEffect(() => {
     const el = wrapRef.current;
     if (!el || !img || !autoFit) return;
     const update = () => {
       const cw = el.clientWidth - 4;
       const ch = el.clientHeight - 4;
+      if (cw < 40 || ch < 40) return;
       const r = Math.min(cw / img.naturalWidth, ch / img.naturalHeight);
-      setFitSize({
-        w: Math.max(1, Math.round(img.naturalWidth * r)),
-        h: Math.max(1, Math.round(img.naturalHeight * r)),
-      });
+      const w = Math.max(1, Math.round(img.naturalWidth * r));
+      const h = Math.max(1, Math.round(img.naturalHeight * r));
+      setFitSize((prev) => (prev && prev.w === w && prev.h === h ? prev : { w, h }));
     };
     update();
     const ro = new ResizeObserver(update);
     ro.observe(el);
-    return () => ro.disconnect();
+    window.addEventListener("resize", update);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", update);
+    };
   }, [img, autoFit]);
 
   /** 手动缩放时，以当前适应比例作为起点 */
@@ -1444,7 +1463,7 @@ export default function DispersionPanel(props: { onBack: () => void }) {
         {/* 结果区 */}
         <div
           style={{
-            width: 208,
+            width: "clamp(260px, 22vw, 330px)",
             flexShrink: 0,
             overflow: "auto",
             background: "#fff",
@@ -1483,58 +1502,66 @@ export default function DispersionPanel(props: { onBack: () => void }) {
           <MetricRow
             label="平均环数"
             color={COLORS.ring}
+            hint="每个弹孔到弹着中心的平均环数（每 14 mm 一环，10 环在中心）"
             value={analysis ? analysis.score.toFixed(2) : "-"}
           />
           <MetricRow
             label="平均散布距离"
             color="#1677ff"
+            hint="每个弹孔到弹着中心的平均距离，越小越集中"
             value={analysis ? analysis.avgDist.toFixed(1) : "-"}
             unit="mm"
           />
           <MetricRow
-            label="最小包围圆半径"
+            label="包围圆半径"
             color={COLORS.mec}
+            hint="包住全部弹孔的最小圆半径"
             value={analysis ? (analysis.mec.radius * mmPerPx).toFixed(1) : "-"}
             unit="mm"
           />
           <MetricRow
-            label="R50（半数落点半径）"
+            label="R50"
             color={COLORS.mec}
+            hint="半数落点半径：一半弹孔落在这个半径内，越小越密集"
             value={geo ? geo.r50.toFixed(2) : "-"}
             unit="mm"
           />
           <MetricRow
-            label="水平/垂直散布 Cx·Cy"
+            label="水平/垂直散布"
             color={COLORS.mec}
+            hint="Cx / Cy：落点在水平、垂直方向的样本标准差"
             value={geo ? `${geo.cx.toFixed(1)} / ${geo.cy.toFixed(1)}` : "-"}
             unit="mm"
           />
           <MetricRow
             label="纵横比"
             color={COLORS.mec}
+            hint="Cx ÷ Cy，> 1 表示横向比纵向散"
             value={geo ? geo.aspect.toFixed(2) : "-"}
             unit=""
           />
           <MetricRow
             label="弹着中心偏移"
             color={COLORS.center}
+            hint="点群重心相对靶纸中心的距离"
             value={geo ? geo.dist.toFixed(1) : "-"}
             unit="mm"
           />
           {geo && (
-            <div
-              style={{
-                fontSize: 12,
-                color: "#666",
-                padding: "2px 0 6px 6px",
-                lineHeight: 1.6,
-              }}
-            >
-              方向：{geo.dx >= 0 ? "右" : "左"}
-              {Math.abs(geo.dx).toFixed(1)} · {geo.dy >= 0 ? "下" : "上"}
-              {Math.abs(geo.dy).toFixed(1)} mm（{geo.angleDeg.toFixed(0)}
-              °，0°=正右，90°=正下）
-            </div>
+            <Tooltip title="以靶纸中心为原点，角度 0° 为正右、顺时针增大（90° 正下）">
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "#666",
+                  padding: "2px 0 6px 6px",
+                  lineHeight: 1.5,
+                }}
+              >
+                方向 {geo.dx >= 0 ? "右" : "左"}
+                {Math.abs(geo.dx).toFixed(1)} · {geo.dy >= 0 ? "下" : "上"}
+                {Math.abs(geo.dy).toFixed(1)} mm（{geo.angleDeg.toFixed(0)}°）
+              </div>
+            </Tooltip>
           )}
           <Divider style={{ margin: "8px 0" }} />
           <div style={{ fontSize: 12, color: "#999", marginBottom: 2 }}>
