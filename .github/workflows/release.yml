@@ -1,0 +1,63 @@
+name: release
+
+# 手动触发：给某个已存在的 tag 追加/更新安装包
+#   gh workflow run release.yml -f tagName=v0.8.0
+# 或推送 v* tag 时自动构建并创建/更新 Release
+on:
+  workflow_dispatch:
+    inputs:
+      tagName:
+        description: "要附加安装包的 tag（例如 v0.8.0）"
+        required: true
+        type: string
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  linux:
+    name: Ubuntu (deb + AppImage)
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # Tauri 在 Linux 上的系统依赖；libudev-dev 给 serialport 用
+      - name: 安装系统依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libudev-dev
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: 构建并上传到 Release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.event.inputs.tagName || github.ref_name }}
+          releaseName: ${{ github.event.inputs.tagName || github.ref_name }}
+          releaseDraft: false
+          prerelease: false
+          args: --bundles deb,appimage
