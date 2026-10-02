@@ -38,7 +38,7 @@ export function trendSlope(values: number[]): number | null {
   return num / den;
 }
 
-/** 热枪效应：后 k 发均值 − 前 k 发均值 */
+/** 后 k 发均值 − 前 k 发均值 */
 export function hotGunDelta(values: number[], k = 3): number | null {
   if (values.length < 2 * k) return null;
   const head = values.slice(0, k);
@@ -551,22 +551,22 @@ export interface CrossGroupStats {
   name: string;
   n: number;
   mean: number;
-  /** 前 k 发均值（冷枪段） */
+  /** 前 k 发均值 */
   firstK: number;
-  /** 其余发均值（热枪段） */
+  /** 其余发均值 */
   restMean: number;
-  /** 冷枪效应 = 前 k 发 − 其余发（正=开机头几发偏快） */
+  /** 前 k 发均值 − 其余发均值（正 = 头几发偏快） */
   coldDelta: number;
   /** 组内后 3 发均值 */
   tail3: number | null;
-  /** 组内热枪效应 = 后3发 − 前3发 */
+  /** 组内 后3发 − 前3发 */
   hotDelta: number | null;
   cv: number | null;
   /** 该组开始时间（按时间排序用） */
   startedAt: number;
 }
 
-/** 跨多组统计：把每组按时间顺序排好，给出冷枪段/热枪段对照 */
+/** 跨多组统计：把每组按时间顺序排好，给出「头几发 / 其余发」的对照 */
 export function crossGroupStats(groups: Group[], k = 3): CrossGroupStats[] {
   return [...groups]
     .sort((a, b) => a.startedAt - b.startedAt || a.id - b.id)

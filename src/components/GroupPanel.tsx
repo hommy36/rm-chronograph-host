@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import {
   Badge,
@@ -19,6 +19,7 @@ import type { MenuProps } from "antd";
 import {
   AimOutlined,
   CheckCircleFilled,
+  CheckOutlined,
   DeleteOutlined,
   DownOutlined,
   EditOutlined,
@@ -90,6 +91,7 @@ export default function GroupPanel() {
   const renameGroup = useAppStore((s) => s.renameGroup);
   const setTestNote = useAppStore((s) => s.setTestNote);
   const setGroupNote = useAppStore((s) => s.setGroupNote);
+  const setGroupParams = useAppStore((s) => s.setGroupParams);
   const deleteTest = useAppStore((s) => s.deleteTest);
   const setActiveTest = useAppStore((s) => s.setActiveTest);
   const setViewingGroup = useAppStore((s) => s.setViewingGroup);
@@ -108,6 +110,8 @@ export default function GroupPanel() {
   const [renaming, setRenaming] = useState<Editing | null>(null);
   /** 展开的测试（默认跟随当前测试） */
   const [expanded, setExpanded] = useState<number | null>(null);
+  /** 正在「修改」上一组数据的组 id（null = 没在改） */
+  const [editingGroupId, setEditingGroupId] = useState<number | null>(null);
 
   const activeGroup = groups.find((g) => g.id === activeGroupId) ?? null;
   const shotCount = activeGroup?.shots.length ?? 0;
@@ -117,11 +121,50 @@ export default function GroupPanel() {
     0
   );
 
+  /** 侧栏当前选中（正在查看）的组：表单的灰色提示与「修改」都对着它 */
+  const viewGroup = useMemo(
+    () => groups.find((g) => g.id === viewingGroupId) ?? null,
+    [groups, viewingGroupId]
+  );
+  /** 正在改的组正好是选中那组时才算编辑态（切走就自动退出） */
+  const editingView =
+    editingGroupId !== null && editingGroupId === viewGroup?.id;
+
   const groupsOf = (testId: number) => groups.filter((g) => g.testId === testId);
   const expandedId = expanded ?? activeTestId;
 
+  // 结束一组后清空表单：回到「灰色提示选中组参数」的默认样子
+  const prevActiveRef = useRef<number | null>(null);
+  useEffect(() => {
+    const prev = prevActiveRef.current;
+    prevActiveRef.current = activeGroupId;
+    if (prev !== null && activeGroupId === null) {
+      setParams({ ...EMPTY_PARAMS });
+      setEditingGroupId(null);
+    }
+  }, [activeGroupId]);
+
+  /** 进入/退出「修改」：进去时把选中组的值搬进表单，改一个字符就写回 */
+  const toggleEdit = () => {
+    if (editingView) {
+      setEditingGroupId(null);
+      setParams({ ...EMPTY_PARAMS });
+      return;
+    }
+    if (!viewGroup) return;
+    setEditingGroupId(viewGroup.id);
+    setParams({ ...viewGroup.params });
+  };
+
+  const handleField = (key: keyof GroupParams, value: string) => {
+    const next = { ...params, [key]: value };
+    setParams(next);
+    if (editingView && viewGroup) setGroupParams(viewGroup.id, next);
+  };
+
   const handleStart = () => {
     startGroup({ ...params });
+    setEditingGroupId(null);
     message.success("已开始新组，测速帧将计入该组");
   };
 
@@ -264,18 +307,6 @@ export default function GroupPanel() {
       onClick: () => setRenaming({ kind: "group", field: "name", id: g.id, value: g.name }),
     },
     {
-      key: "note",
-      icon: <FileTextOutlined />,
-      label: g.params.note ? "编辑备注" : "添加备注",
-      onClick: () =>
-        setRenaming({
-          kind: "group",
-          field: "note",
-          id: g.id,
-          value: g.params.note,
-        }),
-    },
-    {
       key: "export",
       icon: <ExportOutlined />,
       label: "导出该组明细 CSV",
@@ -327,6 +358,25 @@ export default function GroupPanel() {
       }
       extra={
         <Space size={4}>
+          <Tooltip
+            title={
+              !viewGroup
+                ? "左侧还没有选中的组"
+                : editingView
+                  ? `改完点「完成」退出（改动已即时保存到「${viewGroup.name}」）`
+                  : `直接改选中这一组（${viewGroup.name}）的参数与备注，改一个字符就存回`
+            }
+          >
+            <Button
+              size="small"
+              type={editingView ? "primary" : "text"}
+              icon={editingView ? <CheckOutlined /> : <EditOutlined />}
+              disabled={!viewGroup}
+              onClick={toggleEdit}
+            >
+              {editingView ? "完成" : "修改"}
+            </Button>
+          </Tooltip>
           <span style={{ fontSize: 12, color: "#888" }}>目标</span>
           <InputNumber
             size="small"
@@ -365,12 +415,20 @@ export default function GroupPanel() {
             key={f.key}
             addonBefore={<span style={addonLabelStyle}>{f.label}</span>}
             addonAfter={f.suffix}
-            placeholder={f.placeholder}
+            // 灰色提示显示上一组保存过的值（没点「修改」时表单是空的）
+            placeholder={
+              viewGroup?.params[f.key]?.trim() || f.placeholder
+            }
             value={params[f.key]}
             disabled={activeGroup !== null}
-            onChange={(e) => setParams({ ...params, [f.key]: e.target.value })}
+            onChange={(e) => handleField(f.key, e.target.value)}
           />
         ))}
+        {editingView && (
+          <div style={{ fontSize: 12, color: "#1677ff" }}>
+            正在改「{viewGroup?.name}」的参数，改完点右上角「完成」
+          </div>
+        )}
       </div>
 
       {/* 操作按钮 */}

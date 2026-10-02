@@ -91,6 +91,27 @@ describe("分组管理", () => {
     g = useAppStore.getState().groups[0];
     expect(g.dispersion).toBeUndefined();
   });
+
+  it("整组参数写回（表单里修改上一组用）", () => {
+    useAppStore.getState().startGroup({ ...EMPTY_PARAMS });
+    const id = useAppStore.getState().groups[0].id;
+    useAppStore.getState().setGroupParams(id, {
+      ...EMPTY_PARAMS,
+      stage1_rpm: "5200",
+      compression: "1.5",
+      note: "改过的备注",
+    });
+    const g = useAppStore.getState().groups[0];
+    expect(g.params.stage1_rpm).toBe("5200");
+    expect(g.params.compression).toBe("1.5");
+    expect(g.params.note).toBe("改过的备注");
+    // 只动目标组
+    useAppStore.getState().startGroup({ ...EMPTY_PARAMS });
+    useAppStore.getState().setGroupParams(id, { ...EMPTY_PARAMS, note: "只改第一组" });
+    const all = useAppStore.getState().groups;
+    expect(all[0].params.note).toBe("只改第一组");
+    expect(all[1].params.note).toBe("");
+  });
 });
 
 describe("测试 → 组 两级结构", () => {

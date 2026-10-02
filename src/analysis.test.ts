@@ -35,7 +35,7 @@ describe("outliers", () => {
   });
 });
 
-describe("趋势 / 热枪 / 节奏 / 达标率", () => {
+describe("趋势 / 前后段差 / 节奏 / 达标率", () => {
   it("完美线性序列斜率为每发增量", () => {
     expect(trendSlope([10, 11, 12, 13, 14])).toBeCloseTo(1, 10);
     expect(trendSlope([14, 13, 12, 11])).toBeCloseTo(-1, 10);
@@ -43,7 +43,7 @@ describe("趋势 / 热枪 / 节奏 / 达标率", () => {
   it("点太少返回 null", () => {
     expect(trendSlope([1, 2])).toBeNull();
   });
-  it("热枪效应 = 后3发 − 前3发", () => {
+  it("后3发均值 − 前3发均值", () => {
     expect(hotGunDelta([10, 10, 10, 12, 12, 12])).toBeCloseTo(2, 10);
     expect(hotGunDelta([10, 10])).toBeNull();
   });
@@ -205,7 +205,7 @@ describe("显著性检验", () => {
 });
 
 describe("跨多组（当日）分析", () => {
-  /** 造一组：前 k 发偏快 0.1（模拟冷枪），其余稳定 */
+  /** 造一组：前 k 发偏快 0.1，其余稳定 */
   const mk = (id: number, startedAt: number, cold = 0.1): Group => {
     const t0 = startedAt;
     const speeds = [15.6 + cold, 15.6 + cold, 15.6 + cold, 15.6, 15.6, 15.6, 15.6];
@@ -224,7 +224,7 @@ describe("跨多组（当日）分析", () => {
     };
   };
 
-  it("按时间排序并给出冷枪段/热枪段", () => {
+  it("按时间排序并给出前段/后段对照", () => {
     const g3 = mk(3, 3000);
     const g1 = mk(1, 1000);
     const g2 = mk(2, 2000);

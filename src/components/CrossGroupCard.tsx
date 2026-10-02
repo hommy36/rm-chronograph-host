@@ -10,7 +10,7 @@ import { crossGroupSeries, crossGroupStats } from "../analysis";
 export default function CrossGroupCard() {
   const allGroups = useAppStore((s) => s.groups);
   const activeTestId = useAppStore((s) => s.activeTestId);
-  // 跨组时间轴只拼当前测试的组（热枪/漂移按天看才准）
+  // 跨组时间轴只拼当前测试的组（按一天内的先后看走势）
   const groups = useMemo(
     () => allGroups.filter((g) => g.testId === activeTestId),
     [allGroups, activeTestId]

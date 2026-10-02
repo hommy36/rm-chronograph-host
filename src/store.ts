@@ -137,6 +137,8 @@ interface AppState {
   deleteGroup: (id: number) => void;
   /** 写入/清空某组的散布分析数据 */
   setGroupDispersion: (id: number, data: DispersionData | undefined) => void;
+  /** 整组工况参数一次性写回（表单里「修改」上一组时用） */
+  setGroupParams: (id: number, params: GroupParams) => void;
   /** 写入某组的波形通道分配（随组保存） */
   setGroupWaveConfig: (id: number, cfg: WaveConfig) => void;
 }
@@ -587,6 +589,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   setGroupDispersion: (id, data) =>
     set((s) => ({
       groups: s.groups.map((g) => (g.id === id ? { ...g, dispersion: data } : g)),
+    })),
+
+  setGroupParams: (id, params) =>
+    set((s) => ({
+      groups: s.groups.map((g) => (g.id === id ? { ...g, params: { ...params } } : g)),
     })),
 
   setGroupWaveConfig: (id, cfg) =>

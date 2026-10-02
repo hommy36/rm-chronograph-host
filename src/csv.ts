@@ -230,7 +230,7 @@ export function buildOverviewCsv(
     `达标率(±${tolPct}%)`,
     "离群发数",
     "趋势(m/s/发)",
-    "热枪效应(m/s)",
+    "后3发-前3发(m/s)",
     "发间隔中位(s)",
     "发间隔最长(s)",
     "平均掉速%",
