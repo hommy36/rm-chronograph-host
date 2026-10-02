@@ -13,10 +13,12 @@ import {
   serializeSession,
   type SessionFile,
 } from "./persist";
-import type { Group, WaveConfig } from "./types";
+import type { Group, TestSession, WaveConfig } from "./types";
 
 interface Snapshot {
+  tests: TestSession[];
   groups: Group[];
+  nextTestId: number;
   nextGroupId: number;
   targetShots: number;
   waveConfig: WaveConfig;
@@ -64,12 +66,21 @@ export async function loadSession(): Promise<
   }
 }
 
-/** 导出项目文件（.rmtest） */
+/** 导出项目文件（.rmtest）；可只导出某个测试 */
 export async function exportProject(
   snap: Snapshot,
-  defaultName: string
+  defaultName: string,
+  onlyTestId?: number
 ): Promise<boolean> {
-  const data: SessionFile = serializeSession(snap);
+  const data: SessionFile = serializeSession(
+    onlyTestId === undefined
+      ? snap
+      : {
+          ...snap,
+          tests: snap.tests.filter((t) => t.id === onlyTestId),
+          groups: snap.groups.filter((g) => g.testId === onlyTestId),
+        }
+  );
   const json = JSON.stringify(data);
   if (isTauri()) {
     const path = await save({

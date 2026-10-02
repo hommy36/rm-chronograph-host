@@ -1,5 +1,13 @@
 import { create } from "zustand";
-import type { DispersionData, Group, GroupParams, Shot, SpeedFrameMsg, WaveConfig } from "./types";
+import type {
+  DispersionData,
+  Group,
+  GroupParams,
+  Shot,
+  SpeedFrameMsg,
+  TestSession,
+  WaveConfig,
+} from "./types";
 import { EMPTY_PARAMS, EMPTY_WAVE_CONFIG } from "./types";
 import { JustFloatParser } from "./justfloat";
 import { SNAP_POST_MS, takeSnapshot, WaveBuffer } from "./wave";
@@ -57,6 +65,11 @@ interface AppState {
   lastEventAt: number;
   counters: Counters;
   latest: SpeedFrameMsg | null;
+  /** 测试（一次实验）列表，组挂在测试下面 */
+  tests: TestSession[];
+  /** 界面当前选中的测试 */
+  activeTestId: number | null;
+  nextTestId: number;
   groups: Group[];
   /** 正在记录的组 */
   activeGroupId: number | null;
@@ -84,6 +97,13 @@ interface AppState {
   onCrcError: () => void;
   /** 看门狗：由定时器周期调用 */
   tick: (nowMs: number) => void;
+  /** 新建测试，返回其 id */
+  startTest: (name?: string) => number;
+  renameTest: (id: number, name: string) => void;
+  /** 删除测试（连同其下所有组） */
+  deleteTest: (id: number) => void;
+  setActiveTest: (id: number) => void;
+  renameGroup: (id: number, name: string) => void;
   startGroup: (params: GroupParams) => void;
   endGroup: () => void;
   setViewingGroup: (id: number) => void;
@@ -97,9 +117,11 @@ interface AppState {
   /** 勾选/取消勾选对比组（最多 2 个，超出时挤掉最早的） */
   toggleCompare: (groupId: number) => void;
   clearCompare: () => void;
-  /** 从持久化数据恢复（启动载入 / 导入合并） */
+  /** 从持久化数据恢复（启动载入 / 导入为测试） */
   hydrate: (data: {
+    tests: TestSession[];
     groups: Group[];
+    nextTestId: number;
     nextGroupId: number;
     targetShots: number;
     waveConfig: WaveConfig;
@@ -115,8 +137,18 @@ interface AppState {
   setGroupWaveConfig: (id: number, cfg: WaveConfig) => void;
 }
 
-function makeGroup(id: number, name: string, params: GroupParams): Group {
-  return { id, name, params, startedAt: Date.now(), shots: [] };
+function makeGroup(
+  id: number,
+  testId: number,
+  name: string,
+  params: GroupParams
+): Group {
+  return { id, testId, name, params, startedAt: Date.now(), shots: [] };
+}
+
+/** 某个测试下的组 */
+export function groupsOfTest(groups: Group[], testId: number | null): Group[] {
+  return testId === null ? [] : groups.filter((g) => g.testId === testId);
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -127,6 +159,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   lastEventAt: 0,
   counters: { frames: 0, heartbeats: 0, crcErrors: 0 },
   latest: null,
+  tests: [],
+  activeTestId: null,
+  nextTestId: 1,
   groups: [],
   activeGroupId: null,
   viewingGroupId: null,
@@ -163,15 +198,39 @@ export const useAppStore = create<AppState>((set, get) => ({
   onFrame: (msg) =>
     set((s) => {
       let { groups, activeGroupId, viewingGroupId, nextGroupId } = s;
-      // 仅在"一个组都没有"时自动创建"未分组"兜底，保证新手不丢数据；
+      let { tests, activeTestId, nextTestId } = s;
+      // 仅在"一个组都没有"时自动创建测试 + "未分组"兜底，保证新手不丢数据；
       // 一旦用户结束过组别（存在历史组），未开组的帧只实时显示、不记录，
       // 避免两组测试之间产生垃圾组。
       if (activeGroupId === null && groups.length === 0) {
-        const g = makeGroup(nextGroupId, "未分组", { ...EMPTY_PARAMS });
+        if (activeTestId === null) {
+          activeTestId = nextTestId;
+          tests = [
+            ...tests,
+            {
+              id: activeTestId,
+              name: `第${tests.length + 1}次测试`,
+              createdAt: msg.at_ms,
+              startedAt: msg.at_ms,
+            },
+          ];
+          nextTestId += 1;
+        }
+        const g = makeGroup(nextGroupId, activeTestId!, "未分组", {
+          ...EMPTY_PARAMS,
+        });
         groups = [...groups, g];
         activeGroupId = g.id;
         viewingGroupId = g.id;
         nextGroupId += 1;
+      }
+      // 测试的起始时间跟随其第一发
+      if (activeTestId !== null) {
+        tests = tests.map((t) =>
+          t.id === activeTestId && t.startedAt === 0
+            ? { ...t, startedAt: msg.at_ms }
+            : t
+        );
       }
       if (activeGroupId !== null) {
         groups = groups.map((g) => {
@@ -194,6 +253,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         });
       }
       return {
+        tests,
+        activeTestId,
+        nextTestId,
         groups,
         activeGroupId,
         viewingGroupId,
@@ -258,10 +320,106 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  startTest: (name) => {
+    let newId = 0;
+    set((s) => {
+      newId = s.nextTestId;
+      const t: TestSession = {
+        id: newId,
+        name: name?.trim() || `第${s.tests.length + 1}次测试`,
+        createdAt: Date.now(),
+        startedAt: 0,
+      };
+      return {
+        tests: [...s.tests, t],
+        activeTestId: newId,
+        nextTestId: s.nextTestId + 1,
+        compareIds: [],
+      };
+    });
+    return newId;
+  },
+
+  renameTest: (id, name) =>
+    set((s) => ({
+      tests: s.tests.map((t) =>
+        t.id === id ? { ...t, name: name.trim() || t.name } : t
+      ),
+    })),
+
+  deleteTest: (id) =>
+    set((s) => {
+      pendingCaptures = pendingCaptures.filter((p) => {
+        const g = s.groups.find((x) => x.id === p.groupId);
+        return g ? g.testId !== id : false;
+      });
+      const tests = s.tests.filter((t) => t.id !== id);
+      const groups = s.groups.filter((g) => g.testId !== id);
+      const activeTestId =
+        s.activeTestId === id ? (tests[0]?.id ?? null) : s.activeTestId;
+      const viewingGroupId =
+        activeTestId === null
+          ? null
+          : (groups.find((g) => g.testId === activeTestId)?.id ?? null);
+      const activeGroupId =
+        s.activeGroupId !== null &&
+        groups.some((g) => g.id === s.activeGroupId)
+          ? s.activeGroupId
+          : null;
+      return {
+        tests,
+        groups,
+        activeTestId,
+        viewingGroupId,
+        activeGroupId,
+        compareIds: s.compareIds.filter((c) =>
+          groups.some((g) => g.id === c)
+        ),
+      };
+    }),
+
+  setActiveTest: (id) =>
+    set((s) => {
+      const mine = s.groups.filter((g) => g.testId === id);
+      return {
+        activeTestId: id,
+        viewingGroupId: mine[0]?.id ?? null,
+        activeGroupId: mine.some((g) => g.id === s.activeGroupId)
+          ? s.activeGroupId
+          : null,
+        compareIds: s.compareIds.filter((c) => mine.some((g) => g.id === c)),
+      };
+    }),
+
+  renameGroup: (id, name) =>
+    set((s) => ({
+      groups: s.groups.map((g) =>
+        g.id === id ? { ...g, name: name.trim() || g.name } : g
+      ),
+    })),
+
   startGroup: (params) =>
     set((s) => {
-      const g = makeGroup(s.nextGroupId, `组${s.nextGroupId}`, params);
+      let { tests, activeTestId, nextTestId } = s;
+      if (activeTestId === null) {
+        activeTestId = nextTestId;
+        tests = [
+          ...tests,
+          {
+            id: activeTestId,
+            name: `第${tests.length + 1}次测试`,
+            createdAt: Date.now(),
+            startedAt: 0,
+          },
+        ];
+        nextTestId += 1;
+      }
+      const inTest = s.groups.filter((g) => g.testId === activeTestId).length;
+      const g = makeGroup(s.nextGroupId, activeTestId, `组${inTest + 1}`, params);
       return {
+        tests,
+        activeTestId,
+        nextTestId,
         groups: [...s.groups, g],
         activeGroupId: g.id,
         viewingGroupId: g.id,
@@ -279,7 +437,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   clearAll: () => {
     pendingCaptures = [];
     set({
+      tests: [],
       groups: [],
+      activeTestId: null,
+      nextTestId: 1,
       activeGroupId: null,
       viewingGroupId: null,
       nextGroupId: 1,
@@ -341,20 +502,39 @@ export const useAppStore = create<AppState>((set, get) => ({
   hydrate: (data) =>
     set((s) => {
       if (!data.merge) {
+        const firstTest = data.tests[0]?.id ?? null;
+        const firstGroup =
+          data.groups.find((g) => g.testId === firstTest)?.id ?? null;
         return {
+          tests: data.tests,
+          activeTestId: firstTest,
+          nextTestId: data.nextTestId,
           groups: data.groups,
           nextGroupId: data.nextGroupId,
           targetShots: data.targetShots,
           waveConfig: data.waveConfig,
-          viewingGroupId: data.groups.length > 0 ? data.groups[0].id : null,
+          viewingGroupId: firstGroup,
           activeGroupId: null,
           compareIds: [],
         };
       }
-      const merged = mergeImported(s.groups, data.groups, s.nextGroupId);
+      // 导入：文件里的每个测试都变成一个独立的新测试
+      const merged = mergeImported(
+        { tests: s.tests, groups: s.groups },
+        { tests: data.tests, groups: data.groups },
+        { nextTestId: s.nextTestId, nextGroupId: s.nextGroupId }
+      );
+      const newActive = merged.tests[merged.tests.length - 1]?.id ?? null;
       return {
+        tests: merged.tests,
         groups: merged.groups,
+        nextTestId: merged.nextTestId,
         nextGroupId: merged.nextGroupId,
+        activeTestId: newActive,
+        viewingGroupId:
+          merged.groups.find((g) => g.testId === newActive)?.id ?? null,
+        activeGroupId: null,
+        compareIds: [],
       };
     }),
 

@@ -58,7 +58,15 @@ const TIP = {
 
 /** 测试总览：逐组汇总表 + 跨组时间轴 */
 export default function OverviewPanel() {
-  const groups = useAppStore((s) => s.groups);
+  const allGroups = useAppStore((s) => s.groups);
+  const activeTestId = useAppStore((s) => s.activeTestId);
+  const tests = useAppStore((s) => s.tests);
+  // 只统计当前选中的测试
+  const groups = useMemo(
+    () => allGroups.filter((g) => g.testId === activeTestId),
+    [allGroups, activeTestId]
+  );
+  const testName = tests.find((t) => t.id === activeTestId)?.name ?? "未选择测试";
   const globalCfg = useAppStore((s) => s.waveConfig);
   const viewingGroupId = useAppStore((s) => s.viewingGroupId);
   const setViewingGroup = useAppStore((s) => s.setViewingGroup);
@@ -112,6 +120,7 @@ export default function OverviewPanel() {
       title={
         <Space size={8}>
           <span>测试总览</span>
+          <Tag color="blue">{testName}</Tag>
           <span style={{ fontSize: 12, color: "#999", fontWeight: 400 }}>
             共 {groups.length} 组 / {groups.reduce((a, g) => a + g.shots.length, 0)} 发
           </span>

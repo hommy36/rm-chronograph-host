@@ -30,6 +30,7 @@ function makeGroup(withWave: boolean): Group {
   const t0 = Date.now();
   return {
     id: 1,
+    testId: 1,
     name: "组1",
     params: { ...EMPTY_PARAMS, stage1_rpm: "4500" },
     startedAt: t0 - 60000,

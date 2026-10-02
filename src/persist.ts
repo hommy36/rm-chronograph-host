@@ -3,10 +3,17 @@
  * 重启自动载入, 支持导出/导入 .rmtest 项目文件。
  * 波形按 Float32Array → base64 存储（每点固定 4 字节, 高精度数据比 JSON 数字小 2~3 倍）。
  */
-import type { DispersionData, Group, GroupParams, Shot, WaveConfig } from "./types";
+import type {
+  DispersionData,
+  Group,
+  GroupParams,
+  Shot,
+  TestSession,
+  WaveConfig,
+} from "./types";
 import type { WaveSnapshot } from "./wave";
 
-export const SESSION_VERSION = 1;
+export const SESSION_VERSION = 2;
 export const SESSION_FILE = "session.json";
 export const PROJECT_EXT = "rmtest";
 
@@ -50,6 +57,7 @@ interface SerializedShot {
 
 interface SerializedGroup {
   id: number;
+  testId: number;
   name: string;
   params: GroupParams;
   startedAt: number;
@@ -63,6 +71,9 @@ interface SerializedGroup {
 export interface SessionFile {
   version: number;
   savedAt: number;
+  /** 测试（一次实验）；旧文件没有这个字段，读取时自动迁移 */
+  tests: TestSession[];
+  nextTestId: number;
   nextGroupId: number;
   targetShots: number;
   waveConfig: WaveConfig;
@@ -70,7 +81,9 @@ export interface SessionFile {
 }
 
 export function serializeSession(s: {
+  tests: TestSession[];
   groups: Group[];
+  nextTestId: number;
   nextGroupId: number;
   targetShots: number;
   waveConfig: WaveConfig;
@@ -78,11 +91,14 @@ export function serializeSession(s: {
   return {
     version: SESSION_VERSION,
     savedAt: Date.now(),
+    tests: s.tests.map((t) => ({ ...t })),
+    nextTestId: s.nextTestId,
     nextGroupId: s.nextGroupId,
     targetShots: s.targetShots,
     waveConfig: s.waveConfig,
     groups: s.groups.map((g) => ({
       id: g.id,
+      testId: g.testId,
       name: g.name,
       params: { ...g.params },
       startedAt: g.startedAt,
@@ -109,7 +125,9 @@ export function serializeSession(s: {
 }
 
 export function deserializeSession(text: string): {
+  tests: TestSession[];
   groups: Group[];
+  nextTestId: number;
   nextGroupId: number;
   targetShots: number;
   waveConfig: WaveConfig;
@@ -119,8 +137,26 @@ export function deserializeSession(text: string): {
   if (!raw || !Array.isArray(raw.groups)) {
     throw new Error("文件格式无法识别");
   }
+  // 旧格式（version 1，没有 tests）自动迁移成一个测试
+  let tests: TestSession[] = Array.isArray(raw.tests) ? raw.tests : [];
+  if (tests.length === 0) {
+    const earliest = raw.groups.reduce(
+      (min, g) => (g.startedAt && (min === 0 || g.startedAt < min) ? g.startedAt : min),
+      0
+    );
+    tests = [
+      {
+        id: 1,
+        name: "第一次测试",
+        createdAt: earliest || Date.now(),
+        startedAt: earliest,
+      },
+    ];
+  }
+  const firstTestId = tests[0].id;
   const groups: Group[] = raw.groups.map((g) => ({
     id: g.id,
+    testId: g.testId ?? firstTestId,
     name: g.name,
     params: { ...g.params },
     startedAt: g.startedAt,
@@ -152,8 +188,11 @@ export function deserializeSession(text: string): {
     }),
   }));
   const maxId = groups.reduce((m, g) => Math.max(m, g.id), 0);
+  const maxTestId = tests.reduce((m, t) => Math.max(m, t.id), 0);
   return {
+    tests,
     groups,
+    nextTestId: Math.max(raw.nextTestId ?? 0, maxTestId + 1),
     nextGroupId: Math.max(raw.nextGroupId ?? 0, maxId + 1),
     targetShots: raw.targetShots ?? 100,
     waveConfig: raw.waveConfig ?? { groups: [], channelLabels: {} },
@@ -166,14 +205,45 @@ export function deserializeSession(text: string): {
  * 返回重编号后的组与新的 nextGroupId。
  */
 export function mergeImported(
-  existing: Group[],
-  incoming: Group[],
-  nextGroupId: number
-): { groups: Group[]; nextGroupId: number } {
-  let next = nextGroupId;
-  const renamed = incoming.map((g) => {
-    const id = next++;
-    return { ...g, id, name: existing.some((e) => e.name === g.name) ? `${g.name}(导入)` : g.name };
-  });
-  return { groups: [...existing, ...renamed], nextGroupId: next };
+  existing: { tests: TestSession[]; groups: Group[] },
+  incoming: { tests: TestSession[]; groups: Group[] },
+  counters: { nextTestId: number; nextGroupId: number }
+): {
+  tests: TestSession[];
+  groups: Group[];
+  nextTestId: number;
+  nextGroupId: number;
+} {
+  let nextTestId = counters.nextTestId;
+  let nextGroupId = counters.nextGroupId;
+  const tests: TestSession[] = [...existing.tests];
+  const groups: Group[] = [...existing.groups];
+
+  // 文件里没有测试信息时（旧格式），把全部来组整体包装成一个测试
+  const legacy = incoming.tests.length === 0;
+  const incomingTests: TestSession[] = legacy
+    ? [
+        {
+          id: -1,
+          name: "导入测试",
+          createdAt: Date.now(),
+          startedAt: incoming.groups[0]?.startedAt ?? Date.now(),
+        },
+      ]
+    : incoming.tests;
+
+  for (const t of incomingTests) {
+    const newTestId = nextTestId++;
+    const name = existing.tests.some((x) => x.name === t.name)
+      ? `${t.name}(导入)`
+      : t.name;
+    tests.push({ ...t, id: newTestId, name });
+    const mine = legacy
+      ? incoming.groups
+      : incoming.groups.filter((x) => x.testId === t.id);
+    for (const g of mine) {
+      groups.push({ ...g, id: nextGroupId++, testId: newTestId });
+    }
+  }
+  return { tests, groups, nextTestId, nextGroupId };
 }

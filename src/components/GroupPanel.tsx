@@ -5,31 +5,38 @@ import {
   Button,
   Card,
   Checkbox,
+  Dropdown,
   Input,
   InputNumber,
+  Modal,
   message,
   Popconfirm,
   Progress,
   Space,
   Tooltip,
 } from "antd";
+import type { MenuProps } from "antd";
 import {
   AimOutlined,
   CheckCircleFilled,
   DeleteOutlined,
+  DownOutlined,
+  EditOutlined,
   ExperimentOutlined,
   ExportOutlined,
   FundOutlined,
   ImportOutlined,
   InboxOutlined,
   PlusOutlined,
+  RightOutlined,
   StopOutlined,
   ThunderboltOutlined,
 } from "@ant-design/icons";
 import { useAppStore } from "../store";
-import type { GroupParams } from "../types";
+import type { Group, GroupParams, TestSession } from "../types";
 import { EMPTY_PARAMS } from "../types";
 import { exportProject, importProject } from "../sessionIO";
+import { buildGroupCsv, saveCsv } from "../csv";
 import CompareModal from "./CompareModal";
 
 const FIELDS: {
@@ -53,24 +60,50 @@ const addonLabelStyle: CSSProperties = {
   color: "#555",
 };
 
+function fmtDateTime(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number, w = 2) => String(n).padStart(w, "0");
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(
+    d.getMinutes()
+  )}`;
+}
+
+/** 重命名弹窗的目标 */
+interface Renaming {
+  kind: "test" | "group";
+  id: number;
+  value: string;
+}
+
 export default function GroupPanel() {
+  const tests = useAppStore((s) => s.tests);
+  const activeTestId = useAppStore((s) => s.activeTestId);
   const groups = useAppStore((s) => s.groups);
   const activeGroupId = useAppStore((s) => s.activeGroupId);
   const viewingGroupId = useAppStore((s) => s.viewingGroupId);
   const startGroup = useAppStore((s) => s.startGroup);
   const endGroup = useAppStore((s) => s.endGroup);
+  const startTest = useAppStore((s) => s.startTest);
+  const renameTest = useAppStore((s) => s.renameTest);
+  const renameGroup = useAppStore((s) => s.renameGroup);
+  const deleteTest = useAppStore((s) => s.deleteTest);
+  const setActiveTest = useAppStore((s) => s.setActiveTest);
   const setViewingGroup = useAppStore((s) => s.setViewingGroup);
+  const deleteGroup = useAppStore((s) => s.deleteGroup);
   const clearAll = useAppStore((s) => s.clearAll);
   const targetShots = useAppStore((s) => s.targetShots);
   const setTargetShots = useAppStore((s) => s.setTargetShots);
-
-  const [params, setParams] = useState<GroupParams>({ ...EMPTY_PARAMS });
   const compareIds = useAppStore((s) => s.compareIds);
   const toggleCompare = useAppStore((s) => s.toggleCompare);
   const clearWaveforms = useAppStore((s) => s.clearWaveforms);
-  const deleteGroup = useAppStore((s) => s.deleteGroup);
+  const waveConfig = useAppStore((s) => s.waveConfig);
+
+  const [params, setParams] = useState<GroupParams>({ ...EMPTY_PARAMS });
   const [compareOpen, setCompareOpen] = useState(false);
   const [ioBusy, setIoBusy] = useState(false);
+  const [renaming, setRenaming] = useState<Renaming | null>(null);
+  /** 展开的测试（默认跟随当前测试） */
+  const [expanded, setExpanded] = useState<number | null>(null);
 
   const activeGroup = groups.find((g) => g.id === activeGroupId) ?? null;
   const shotCount = activeGroup?.shots.length ?? 0;
@@ -80,22 +113,37 @@ export default function GroupPanel() {
     0
   );
 
+  const groupsOf = (testId: number) => groups.filter((g) => g.testId === testId);
+  const expandedId = expanded ?? activeTestId;
+
   const handleStart = () => {
     startGroup({ ...params });
     message.success("已开始新组，测速帧将计入该组");
   };
 
-  const handleExportProject = async () => {
+  const handleNewTest = () => {
+    const id = startTest();
+    setExpanded(id);
+    message.success("已新建测试，点「开始新组」开始记录");
+  };
+
+  const snapshot = () => {
+    const s = useAppStore.getState();
+    return {
+      tests: s.tests,
+      groups: s.groups,
+      nextTestId: s.nextTestId,
+      nextGroupId: s.nextGroupId,
+      targetShots: s.targetShots,
+      waveConfig: s.waveConfig,
+    };
+  };
+
+  const handleExportAll = async () => {
     setIoBusy(true);
     try {
-      const s = useAppStore.getState();
       const ok = await exportProject(
-        {
-          groups: s.groups,
-          nextGroupId: s.nextGroupId,
-          targetShots: s.targetShots,
-          waveConfig: s.waveConfig,
-        },
+        snapshot(),
         `测速项目_${new Date().toISOString().slice(0, 10)}.rmtest`
       );
       if (ok) message.success("项目已导出");
@@ -106,18 +154,132 @@ export default function GroupPanel() {
     }
   };
 
-  const handleImportProject = async () => {
+  const handleExportTest = async (t: TestSession) => {
+    setIoBusy(true);
+    try {
+      const ok = await exportProject(
+        snapshot(),
+        `${t.name}.rmtest`,
+        t.id
+      );
+      if (ok) message.success(`已导出测试「${t.name}」`);
+    } catch (e) {
+      message.error(`导出失败：${e}`);
+    } finally {
+      setIoBusy(false);
+    }
+  };
+
+  const handleExportGroup = async (g: Group) => {
+    setIoBusy(true);
+    try {
+      const ok = await saveCsv(
+        `${g.name}_明细.csv`,
+        buildGroupCsv(g, g.waveConfig ?? waveConfig)
+      );
+      if (ok) message.success(`已导出「${g.name}」明细`);
+    } catch (e) {
+      message.error(`导出失败：${e}`);
+    } finally {
+      setIoBusy(false);
+    }
+  };
+
+  const handleImportTest = async () => {
     setIoBusy(true);
     try {
       const data = await importProject();
       if (!data) return;
       useAppStore.getState().hydrate({ ...data, merge: true });
-      message.success(`已导入 ${data.groups.length} 组数据`);
+      setExpanded(null);
+      message.success(
+        `已导入 ${data.tests.length} 个测试 / ${data.groups.length} 组`
+      );
     } catch (e) {
       message.error(`导入失败：${e}`);
     } finally {
       setIoBusy(false);
     }
+  };
+
+  const confirmDeleteTest = (t: TestSession) => {
+    const n = groupsOf(t.id).length;
+    Modal.confirm({
+      title: `删除测试「${t.name}」？`,
+      content: `其下 ${n} 个组及全部弹速/波形/散布数据都会被删除`,
+      okText: "删除",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: () => {
+        deleteTest(t.id);
+        message.success("已删除测试");
+      },
+    });
+  };
+
+  const testMenu = (t: TestSession): MenuProps["items"] => [
+    {
+      key: "rename",
+      icon: <EditOutlined />,
+      label: "重命名",
+      onClick: () => setRenaming({ kind: "test", id: t.id, value: t.name }),
+    },
+    {
+      key: "export",
+      icon: <ExportOutlined />,
+      label: "导出该测试 (.rmtest)",
+      onClick: () => handleExportTest(t),
+    },
+    { type: "divider" },
+    {
+      key: "delete",
+      icon: <DeleteOutlined />,
+      label: "删除测试",
+      danger: true,
+      onClick: () => confirmDeleteTest(t),
+    },
+  ];
+
+  const groupMenu = (g: Group): MenuProps["items"] => [
+    {
+      key: "rename",
+      icon: <EditOutlined />,
+      label: "重命名",
+      onClick: () => setRenaming({ kind: "group", id: g.id, value: g.name }),
+    },
+    {
+      key: "export",
+      icon: <ExportOutlined />,
+      label: "导出该组明细 CSV",
+      onClick: () => handleExportGroup(g),
+    },
+    { type: "divider" },
+    {
+      key: "delete",
+      icon: <DeleteOutlined />,
+      label: "删除该组",
+      danger: true,
+      onClick: () => {
+        Modal.confirm({
+          title: `删除「${g.name}」？`,
+          content: `该组 ${g.shots.length} 发数据（含波形）将被删除`,
+          okText: "删除",
+          okButtonProps: { danger: true },
+          cancelText: "取消",
+          onOk: () => deleteGroup(g.id),
+        });
+      },
+    },
+  ];
+
+  const handleRenameOk = () => {
+    if (!renaming) return;
+    const name = renaming.value.trim();
+    if (name) {
+      if (renaming.kind === "test") renameTest(renaming.id, name);
+      else renameGroup(renaming.id, name);
+    }
+    setRenaming(null);
   };
 
   return (
@@ -191,7 +353,7 @@ export default function GroupPanel() {
           </Button>
         )}
         <Popconfirm
-          title="清空全部组别与数据？"
+          title="清空全部测试与数据？"
           okText="清空"
           cancelText="取消"
           onConfirm={clearAll}
@@ -247,7 +409,7 @@ export default function GroupPanel() {
         </div>
       )}
 
-      {/* 工具栏：无数据时也要能导入项目 */}
+      {/* 测试记录工具栏 */}
       <div
         style={{
           display: "flex",
@@ -258,23 +420,31 @@ export default function GroupPanel() {
       >
         <span style={{ fontSize: 12, color: "#999" }}>测试记录</span>
         <Space size={2}>
-          <Tooltip title="导入项目文件（.rmtest）">
+          <Tooltip title="新建测试（一次实验包含多个组）">
+            <Button
+              size="small"
+              type="text"
+              icon={<PlusOutlined />}
+              onClick={handleNewTest}
+            />
+          </Tooltip>
+          <Tooltip title="导入 .rmtest（导入为一个或多个新测试）">
             <Button
               size="small"
               type="text"
               icon={<ImportOutlined />}
               loading={ioBusy}
-              onClick={handleImportProject}
+              onClick={handleImportTest}
             />
           </Tooltip>
-          <Tooltip title="导出项目文件（含全部组与波形）">
+          <Tooltip title="导出全部测试 (.rmtest)">
             <Button
               size="small"
               type="text"
               icon={<ExportOutlined />}
-              disabled={groups.length === 0}
+              disabled={tests.length === 0}
               loading={ioBusy}
-              onClick={handleExportProject}
+              onClick={handleExportAll}
             />
           </Tooltip>
           <Popconfirm
@@ -299,6 +469,7 @@ export default function GroupPanel() {
           </Popconfirm>
         </Space>
       </div>
+
       {compareIds.length > 0 && (
         <div style={{ marginBottom: 6 }}>
           <Button
@@ -314,8 +485,8 @@ export default function GroupPanel() {
         </div>
       )}
 
-      {/* 组列表 */}
-      {groups.length === 0 ? (
+      {/* 测试 → 组 两级列表 */}
+      {tests.length === 0 ? (
         <div
           style={{
             border: "1px dashed #d9d9d9",
@@ -330,138 +501,225 @@ export default function GroupPanel() {
           <InboxOutlined
             style={{ fontSize: 22, color: "#c9c9c9", marginBottom: 4 }}
           />
-          <div style={{ color: "#888", fontWeight: 500 }}>暂无组别</div>
+          <div style={{ color: "#888", fontWeight: 500 }}>暂无测试</div>
           <div>
-            第一发测速帧自动创建「未分组」兜底
+            点上方 ＋ 新建测试，再「开始新组」记录
             <br />
-            有历史组后仅记录到当前组
+            收到测速帧也会自动建测试兜底
           </div>
         </div>
       ) : (
-        <>
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 4,
-              flex: 1,
-              minHeight: 0,
-              overflow: "auto",
-            }}
-          >
-            {groups.map((g) => (
-              <Tooltip
-                key={g.id}
-                placement="right"
-                title={
-                  <div style={{ fontSize: 12 }}>
-                    一级转速 {g.params.stage1_rpm || "--"} · 二级转速{" "}
-                    {g.params.stage2_rpm || "--"}
-                    <br />
-                    PID {g.params.pid || "--"} · 压缩量{" "}
-                    {g.params.compression || "--"} mm
-                    <br />
-                    硬度 {g.params.hardness || "--"}
-                    {g.params.note ? ` · ${g.params.note}` : ""}
-                  </div>
-                }
-              >
-                <div
-                  onClick={() => setViewingGroup(g.id)}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    padding: "7px 10px",
-                    borderRadius: 6,
-                    cursor: "pointer",
-                    background:
-                      g.id === viewingGroupId ? "#e6f4ff" : "#fafafa",
-                    border:
-                      g.id === viewingGroupId
-                        ? "1px solid #91caff"
-                        : "1px solid transparent",
-                    transition: "background 0.2s",
-                  }}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+            flex: 1,
+            minHeight: 0,
+            overflow: "auto",
+          }}
+        >
+          {tests.map((t) => {
+            const mine = groupsOf(t.id);
+            const shots = mine.reduce((a, g) => a + g.shots.length, 0);
+            const isOpen = expandedId === t.id;
+            const at = t.startedAt || t.createdAt;
+            return (
+              <div key={t.id}>
+                <Dropdown
+                  menu={{ items: testMenu(t) }}
+                  trigger={["contextMenu"]}
                 >
-                  <span
+                  <div
+                    onClick={() => {
+                      setActiveTest(t.id);
+                      setExpanded(isOpen ? -1 : t.id);
+                    }}
                     style={{
                       display: "flex",
                       alignItems: "center",
                       gap: 6,
-                      fontWeight: 500,
-                      minWidth: 0,
+                      padding: "6px 8px",
+                      borderRadius: 6,
+                      cursor: "pointer",
+                      background: t.id === activeTestId ? "#e6f4ff" : "#fafafa",
+                      border:
+                        t.id === activeTestId
+                          ? "1px solid #91caff"
+                          : "1px solid transparent",
                     }}
                   >
-                    <Checkbox
-                      checked={compareIds.includes(g.id)}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={() => toggleCompare(g.id)}
-                    />
+                    <span style={{ fontSize: 10, color: "#888" }}>
+                      {isOpen ? <DownOutlined /> : <RightOutlined />}
+                    </span>
                     <span
                       style={{
+                        fontWeight: 600,
+                        flex: 1,
+                        minWidth: 0,
                         overflow: "hidden",
                         textOverflow: "ellipsis",
                         whiteSpace: "nowrap",
                       }}
                     >
-                      {g.name}
+                      {t.name}
                     </span>
-                    {g.id === activeGroupId && (
-                      <Badge
-                        status="processing"
-                        text={
-                          <span style={{ fontSize: 12, color: "#1677ff" }}>
-                            记录中
-                          </span>
-                        }
-                      />
-                    )}
-                  </span>
-                  <span
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: "#999",
+                        flexShrink: 0,
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
+                      {fmtDateTime(at)} · {mine.length} 组 / {shots} 发
+                    </span>
+                  </div>
+                </Dropdown>
+                {isOpen && (
+                  <div
                     style={{
                       display: "flex",
-                      alignItems: "center",
+                      flexDirection: "column",
                       gap: 4,
-                      flexShrink: 0,
+                      margin: "4px 0 2px 14px",
                     }}
                   >
-                    {g.dispersion && (
-                      <Tooltip title="该组已有散布分析数据">
-                        <span style={{ color: "#1677ff", fontSize: 12 }}>
-                          <AimOutlined />
-                          {g.dispersion.points.length > 0
-                            ? g.dispersion.points.length
-                            : ""}
-                        </span>
-                      </Tooltip>
+                    {mine.length === 0 ? (
+                      <div style={{ fontSize: 12, color: "#bbb", padding: 4 }}>
+                        还没有组，点「开始新组」开始记录
+                      </div>
+                    ) : (
+                      mine.map((g) => (
+                        <Dropdown
+                          key={g.id}
+                          menu={{ items: groupMenu(g) }}
+                          trigger={["contextMenu"]}
+                        >
+                          <div
+                            onClick={() => setViewingGroup(g.id)}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 4,
+                              padding: "6px 8px",
+                              borderRadius: 6,
+                              cursor: "pointer",
+                              background:
+                                g.id === viewingGroupId ? "#e6f4ff" : "#fafafa",
+                              border:
+                                g.id === viewingGroupId
+                                  ? "1px solid #91caff"
+                                  : "1px solid transparent",
+                            }}
+                          >
+                            <span
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 6,
+                                flex: 1,
+                                minWidth: 0,
+                              }}
+                            >
+                              <Checkbox
+                                checked={compareIds.includes(g.id)}
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={() => toggleCompare(g.id)}
+                              />
+                              <span
+                                style={{
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {g.name}
+                              </span>
+                              {g.id === activeGroupId && (
+                                <Badge
+                                  status="processing"
+                                  text={
+                                    <span
+                                      style={{ fontSize: 12, color: "#1677ff" }}
+                                    >
+                                      记录中
+                                    </span>
+                                  }
+                                />
+                              )}
+                            </span>
+                            <span
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 4,
+                                flexShrink: 0,
+                              }}
+                            >
+                              {g.dispersion && (
+                                <Tooltip title="该组已有散布分析数据">
+                                  <span
+                                    style={{ color: "#1677ff", fontSize: 12 }}
+                                  >
+                                    <AimOutlined />
+                                    {g.dispersion.points.length > 0
+                                      ? g.dispersion.points.length
+                                      : ""}
+                                  </span>
+                                </Tooltip>
+                              )}
+                              <span style={{ color: "#999", fontSize: 12 }}>
+                                {g.shots.length} 发
+                              </span>
+                              <Popconfirm
+                                title={`删除「${g.name}」？`}
+                                description={`该组 ${g.shots.length} 发数据（含波形）将被删除`}
+                                okText="删除"
+                                okButtonProps={{ danger: true }}
+                                cancelText="取消"
+                                onConfirm={() => deleteGroup(g.id)}
+                              >
+                                <Button
+                                  size="small"
+                                  type="text"
+                                  danger
+                                  icon={<DeleteOutlined />}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              </Popconfirm>
+                            </span>
+                          </div>
+                        </Dropdown>
+                      ))
                     )}
-                    <span style={{ color: "#999", fontSize: 12 }}>
-                      {g.shots.length} 发
-                    </span>
-                    <Popconfirm
-                      title={`删除「${g.name}」？`}
-                      description={`该组 ${g.shots.length} 发数据（含波形）将被删除`}
-                      okText="删除"
-                      okButtonProps={{ danger: true }}
-                      cancelText="取消"
-                      onConfirm={() => deleteGroup(g.id)}
-                    >
-                      <Button
-                        size="small"
-                        type="text"
-                        danger
-                        icon={<DeleteOutlined />}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    </Popconfirm>
-                  </span>
-                </div>
-              </Tooltip>
-            ))}
-          </div>
-        </>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       )}
+
+      <Modal
+        open={renaming !== null}
+        title={renaming?.kind === "test" ? "重命名测试" : "重命名组"}
+        okText="保存"
+        cancelText="取消"
+        onOk={handleRenameOk}
+        onCancel={() => setRenaming(null)}
+      >
+        <Input
+          value={renaming?.value ?? ""}
+          autoFocus
+          onChange={(e) =>
+            setRenaming((r) => (r ? { ...r, value: e.target.value } : r))
+          }
+          onPressEnter={handleRenameOk}
+          placeholder="输入新名称"
+        />
+      </Modal>
+
       <CompareModal open={compareOpen} onClose={() => setCompareOpen(false)} />
     </Card>
   );

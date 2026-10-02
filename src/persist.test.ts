@@ -6,7 +6,7 @@ import {
   mergeImported,
   serializeSession,
 } from "./persist";
-import type { Group } from "./types";
+import type { Group, TestSession } from "./types";
 import { EMPTY_PARAMS } from "./types";
 import type { WaveSnapshot } from "./wave";
 
@@ -21,6 +21,7 @@ function group(id: number, name: string, withWave: boolean): Group {
   const t0 = 1_700_000_000_000;
   return {
     id,
+    testId: 1,
     name,
     params: { ...EMPTY_PARAMS, stage1_rpm: "405" },
     startedAt: t0,
@@ -55,7 +56,16 @@ describe("float32 base64 编解码", () => {
 
 describe("会话序列化", () => {
   const session = {
+    tests: [
+      {
+        id: 1,
+        name: "第一次测试",
+        createdAt: 1_700_000_000_000,
+        startedAt: 1_700_000_000_000,
+      },
+    ],
     groups: [group(1, "组1", true), group(2, "组2", false)],
+    nextTestId: 2,
     nextGroupId: 3,
     targetShots: 100,
     waveConfig: { groups: [{ id: 1, name: "一级", channels: [0, 2] }], channelLabels: { 0: "一1" } },
@@ -86,7 +96,16 @@ describe("会话序列化", () => {
       ],
     };
     const g: Group = { ...group(1, "组1", true), shots: [{ idx: 1, speed_mps: 15.5, dt_us: 3200, at_ms: 0, wave: realSnap }] };
-    const withWave = JSON.stringify(serializeSession({ groups: [g], nextGroupId: 2, targetShots: 100, waveConfig: { groups: [], channelLabels: {} } }));
+    const withWave = JSON.stringify(
+      serializeSession({
+        tests: [],
+        groups: [g],
+        nextTestId: 1,
+        nextGroupId: 2,
+        targetShots: 100,
+        waveConfig: { groups: [], channelLabels: {} },
+      })
+    );
     const raw = JSON.stringify(g);
     expect(withWave.length).toBeLessThan(raw.length * 0.8);
   });
@@ -114,7 +133,9 @@ describe("会话序列化", () => {
     };
     const text = JSON.stringify(
       serializeSession({
+        tests: [{ id: 1, name: "第一次测试", createdAt: 0, startedAt: 0 }],
         groups: [g],
+        nextTestId: 2,
         nextGroupId: 2,
         targetShots: 100,
         waveConfig: { groups: [], channelLabels: {} },
@@ -138,7 +159,9 @@ describe("会话序列化", () => {
     };
     const text = JSON.stringify(
       serializeSession({
+        tests: [{ id: 1, name: "第一次测试", createdAt: 0, startedAt: 0 }],
         groups: [g],
+        nextTestId: 2,
         nextGroupId: 2,
         targetShots: 100,
         waveConfig: { groups: [], channelLabels: {} },
@@ -151,30 +174,60 @@ describe("会话序列化", () => {
     expect(back.waveConfig.groups).toHaveLength(0);
   });
 
-  it("旧文件无散布字段不报错", () => {
+  it("旧文件（v1，无 tests）自动迁移成「第一次测试」", () => {
     const text = JSON.stringify({
       version: 1,
       savedAt: 0,
-      nextGroupId: 2,
+      nextGroupId: 3,
       targetShots: 100,
       waveConfig: { groups: [], channelLabels: {} },
       groups: [
-        { id: 1, name: "组1", params: { ...EMPTY_PARAMS }, startedAt: 0, shots: [] },
+        { id: 1, name: "组1", params: { ...EMPTY_PARAMS }, startedAt: 5000, shots: [] },
+        { id: 2, name: "组2", params: { ...EMPTY_PARAMS }, startedAt: 9000, shots: [] },
       ],
     });
     const back = deserializeSession(text);
+    expect(back.tests).toHaveLength(1);
+    expect(back.tests[0].name).toBe("第一次测试");
+    expect(back.tests[0].startedAt).toBe(5000); // 取最早一组的开始时间
+    expect(back.groups.map((g) => g.testId)).toEqual([1, 1]);
     expect(back.groups[0].dispersion).toBeUndefined();
+    expect(back.nextTestId).toBe(2);
   });
 });
 
-describe("导入合并", () => {
-  it("重编号并避免重名", () => {
-    const existing = [group(1, "组1", false)];
-    const incoming = [group(1, "组1", false), group(2, "新组", false)];
-    const { groups, nextGroupId } = mergeImported(existing, incoming, 2);
-    expect(groups.map((g) => g.id)).toEqual([1, 2, 3]);
-    expect(groups[1].name).toBe("组1(导入)");
-    expect(groups[2].name).toBe("新组");
-    expect(nextGroupId).toBe(4);
+describe("导入（按测试合并）", () => {
+  it("文件里的测试变成新测试，组重编号且归到新测试下", () => {
+    const existing = {
+      tests: [{ id: 1, name: "第一次测试", createdAt: 0, startedAt: 0 }],
+      groups: [group(1, "组1", false)],
+    };
+    const incoming = {
+      tests: [{ id: 1, name: "第一次测试", createdAt: 0, startedAt: 0 }],
+      groups: [group(1, "组1", false), group(2, "组2", false)],
+    };
+    const r = mergeImported(existing, incoming, {
+      nextTestId: 2,
+      nextGroupId: 2,
+    });
+    expect(r.tests).toHaveLength(2);
+    expect(r.tests[1].name).toBe("第一次测试(导入)"); // 重名加后缀
+    const importedGroups = r.groups.filter((g) => g.testId === 2);
+    expect(importedGroups).toHaveLength(2);
+    expect(importedGroups.map((g) => g.id)).toEqual([2, 3]);
+    expect(r.nextGroupId).toBe(4);
+    expect(r.nextTestId).toBe(3);
+  });
+
+  it("旧格式（无 tests）整包包装成一个测试", () => {
+    const existing = { tests: [], groups: [] as Group[] };
+    const incoming = {
+      tests: [] as TestSession[],
+      groups: [group(1, "组1", false)],
+    };
+    const r = mergeImported(existing, incoming, { nextTestId: 1, nextGroupId: 1 });
+    expect(r.tests).toHaveLength(1);
+    expect(r.tests[0].name).toBe("导入测试");
+    expect(r.groups[0].testId).toBe(1);
   });
 });

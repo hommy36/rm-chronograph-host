@@ -89,3 +89,94 @@ describe("分组管理", () => {
     expect(g.dispersion).toBeUndefined();
   });
 });
+
+describe("测试 → 组 两级结构", () => {
+  beforeEach(() => {
+    useAppStore.getState().clearAll();
+  });
+
+  it("新建测试、组编号按测试内递增", () => {
+    const st = () => useAppStore.getState();
+    const t1 = st().startTest();
+    expect(st().tests).toHaveLength(1);
+    expect(st().tests[0].name).toBe("第1次测试");
+    expect(st().activeTestId).toBe(t1);
+
+    st().startGroup({ ...EMPTY_PARAMS });
+    st().endGroup();
+    st().startGroup({ ...EMPTY_PARAMS });
+    const g1 = st().groups.filter((g) => g.testId === t1);
+    expect(g1.map((g) => g.name)).toEqual(["组1", "组2"]);
+    expect(g1.every((g) => g.testId === t1)).toBe(true);
+
+    // 第二个测试里编号重新从组1开始
+    const t2 = st().startTest("第二次测试");
+    st().startGroup({ ...EMPTY_PARAMS });
+    const g2 = st().groups.filter((g) => g.testId === t2);
+    expect(g2.map((g) => g.name)).toEqual(["组1"]);
+    expect(st().activeTestId).toBe(t2);
+  });
+
+  it("重命名测试与组", () => {
+    const st = () => useAppStore.getState();
+    const t = st().startTest();
+    st().startGroup({ ...EMPTY_PARAMS });
+    const g = st().groups[0];
+    st().renameTest(t, "夜间测试");
+    st().renameGroup(g.id, "组A");
+    expect(st().tests[0].name).toBe("夜间测试");
+    expect(st().groups[0].name).toBe("组A");
+    // 空名字不覆盖
+    st().renameTest(t, "   ");
+    expect(st().tests[0].name).toBe("夜间测试");
+  });
+
+  it("切测试时查看焦点跟随，勾选对比被清理", () => {
+    const st = () => useAppStore.getState();
+    const t1 = st().startTest();
+    st().startGroup({ ...EMPTY_PARAMS });
+    const g1 = st().groups.filter((g) => g.testId === t1);
+    st().toggleCompare(g1[0].id);
+
+    const t2 = st().startTest();
+    st().startGroup({ ...EMPTY_PARAMS });
+    const g2 = st().groups.filter((g) => g.testId === t2);
+    expect(st().viewingGroupId).toBe(g2[0].id);
+    expect(st().compareIds).toEqual([]); // 跨测试的勾选被清掉
+
+    st().setActiveTest(t1);
+    expect(st().viewingGroupId).toBe(g1[0].id);
+  });
+
+  it("删除测试连带删除其下所有组", () => {
+    const st = () => useAppStore.getState();
+    const t1 = st().startTest();
+    st().startGroup({ ...EMPTY_PARAMS });
+    st().endGroup();
+    st().startGroup({ ...EMPTY_PARAMS });
+    const t2 = st().startTest();
+    st().startGroup({ ...EMPTY_PARAMS });
+
+    st().deleteTest(t1);
+    expect(st().tests.map((t) => t.id)).toEqual([t2]);
+    expect(st().groups.some((g) => g.testId === t1)).toBe(false);
+    expect(st().activeTestId).toBe(t2);
+    expect(st().groups.filter((g) => g.testId === t2)).toHaveLength(1);
+
+    // 删掉最后一个测试后回到空态
+    st().deleteTest(t2);
+    expect(st().tests).toHaveLength(0);
+    expect(st().groups).toHaveLength(0);
+    expect(st().activeTestId).toBeNull();
+    expect(st().viewingGroupId).toBeNull();
+  });
+
+  it("没有测试时点开始新组会自动建测试", () => {
+    const st = () => useAppStore.getState();
+    expect(st().tests).toHaveLength(0);
+    st().startGroup({ ...EMPTY_PARAMS });
+    expect(st().tests).toHaveLength(1);
+    expect(st().groups[0].testId).toBe(st().tests[0].id);
+    expect(st().groups[0].name).toBe("组1");
+  });
+});

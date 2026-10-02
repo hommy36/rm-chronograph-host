@@ -37,6 +37,7 @@ function group(id: number, name: string, speeds: number[], depth: number | null)
   const t0 = 1_700_000_000_000;
   return {
     id,
+    testId: 1,
     name,
     params: { ...EMPTY_PARAMS },
     startedAt: t0,

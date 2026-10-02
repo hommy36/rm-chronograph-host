@@ -70,8 +70,20 @@ export interface GroupParams {
   note: string;
 }
 
+/** 一次测试（一次实验，比如一天测的若干组） */
+export interface TestSession {
+  id: number;
+  name: string;
+  /** 创建时间 */
+  createdAt: number;
+  /** 该测试的起始时间（迁移旧数据时取最早一发的接收时间） */
+  startedAt: number;
+}
+
 export interface Group {
   id: number;
+  /** 所属测试 id */
+  testId: number;
   name: string;
   params: GroupParams;
   startedAt: number;

@@ -93,6 +93,7 @@ function useSessionPersistence() {
     const unsub = useAppStore.subscribe((s, prev) => {
       if (
         s.groups !== prev.groups ||
+        s.tests !== prev.tests ||
         s.waveConfig !== prev.waveConfig ||
         s.targetShots !== prev.targetShots
       ) {
@@ -111,7 +112,9 @@ function useSessionPersistence() {
       lastSaveAt = now;
       const st = useAppStore.getState();
       void saveSession({
+        tests: st.tests,
         groups: st.groups,
+        nextTestId: st.nextTestId,
         nextGroupId: st.nextGroupId,
         targetShots: st.targetShots,
         waveConfig: st.waveConfig,

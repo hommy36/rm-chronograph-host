@@ -8,7 +8,13 @@ import { crossGroupSeries, crossGroupStats } from "../analysis";
 
 /** 跨组时间轴：把一天测的多组按测试顺序拼成一条序列 */
 export default function CrossGroupCard() {
-  const groups = useAppStore((s) => s.groups);
+  const allGroups = useAppStore((s) => s.groups);
+  const activeTestId = useAppStore((s) => s.activeTestId);
+  // 跨组时间轴只拼当前测试的组（热枪/漂移按天看才准）
+  const groups = useMemo(
+    () => allGroups.filter((g) => g.testId === activeTestId),
+    [allGroups, activeTestId]
+  );
 
   const stats = useMemo(() => crossGroupStats(groups, 3), [groups]);
   const series = useMemo(() => crossGroupSeries(groups), [groups]);

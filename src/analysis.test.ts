@@ -208,6 +208,7 @@ describe("跨多组（当日）分析", () => {
     const speeds = [15.6 + cold, 15.6 + cold, 15.6 + cold, 15.6, 15.6, 15.6, 15.6];
     return {
       id,
+      testId: 1,
       name: `组${id}`,
       params: { ...EMPTY_PARAMS },
       startedAt: t0,
@@ -247,6 +248,7 @@ describe("groupSummary", () => {
     const t0 = 1_700_000_000_000;
     return {
       id: 1,
+      testId: 1,
       name: "组1",
       params: { ...EMPTY_PARAMS, stage1_rpm: "5200", hardness: "50a" },
       startedAt: t0,
