@@ -100,6 +100,10 @@ interface AppState {
   /** 新建测试，返回其 id */
   startTest: (name?: string) => number;
   renameTest: (id: number, name: string) => void;
+  /** 写入测试备注（清空后不再保存该字段） */
+  setTestNote: (id: number, note: string) => void;
+  /** 写入某组的备注（存进该组参数里） */
+  setGroupNote: (id: number, note: string) => void;
   /** 删除测试（连同其下所有组） */
   deleteTest: (id: number) => void;
   setActiveTest: (id: number) => void;
@@ -344,6 +348,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((s) => ({
       tests: s.tests.map((t) =>
         t.id === id ? { ...t, name: name.trim() || t.name } : t
+      ),
+    })),
+
+  setTestNote: (id, note) =>
+    set((s) => ({
+      tests: s.tests.map((t) => {
+        if (t.id !== id) return t;
+        const text = note.trim();
+        return text ? { ...t, note: text } : { ...t, note: undefined };
+      }),
+    })),
+
+  setGroupNote: (id, note) =>
+    set((s) => ({
+      groups: s.groups.map((g) =>
+        g.id === id ? { ...g, params: { ...g.params, note: note.trim() } } : g
       ),
     })),
 

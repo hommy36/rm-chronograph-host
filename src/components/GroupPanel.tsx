@@ -24,6 +24,7 @@ import {
   EditOutlined,
   ExperimentOutlined,
   ExportOutlined,
+  FileTextOutlined,
   FundOutlined,
   ImportOutlined,
   InboxOutlined,
@@ -68,9 +69,10 @@ function fmtDateTime(ms: number): string {
   )}`;
 }
 
-/** 重命名弹窗的目标 */
-interface Renaming {
+/** 编辑弹窗的目标（改名字或改备注） */
+interface Editing {
   kind: "test" | "group";
+  field: "name" | "note";
   id: number;
   value: string;
 }
@@ -86,6 +88,8 @@ export default function GroupPanel() {
   const startTest = useAppStore((s) => s.startTest);
   const renameTest = useAppStore((s) => s.renameTest);
   const renameGroup = useAppStore((s) => s.renameGroup);
+  const setTestNote = useAppStore((s) => s.setTestNote);
+  const setGroupNote = useAppStore((s) => s.setGroupNote);
   const deleteTest = useAppStore((s) => s.deleteTest);
   const setActiveTest = useAppStore((s) => s.setActiveTest);
   const setViewingGroup = useAppStore((s) => s.setViewingGroup);
@@ -101,7 +105,7 @@ export default function GroupPanel() {
   const [params, setParams] = useState<GroupParams>({ ...EMPTY_PARAMS });
   const [compareOpen, setCompareOpen] = useState(false);
   const [ioBusy, setIoBusy] = useState(false);
-  const [renaming, setRenaming] = useState<Renaming | null>(null);
+  const [renaming, setRenaming] = useState<Editing | null>(null);
   /** 展开的测试（默认跟随当前测试） */
   const [expanded, setExpanded] = useState<number | null>(null);
 
@@ -222,7 +226,19 @@ export default function GroupPanel() {
       key: "rename",
       icon: <EditOutlined />,
       label: "重命名",
-      onClick: () => setRenaming({ kind: "test", id: t.id, value: t.name }),
+      onClick: () => setRenaming({ kind: "test", field: "name", id: t.id, value: t.name }),
+    },
+    {
+      key: "note",
+      icon: <FileTextOutlined />,
+      label: t.note ? "编辑备注" : "添加备注",
+      onClick: () =>
+        setRenaming({
+          kind: "test",
+          field: "note",
+          id: t.id,
+          value: t.note ?? "",
+        }),
     },
     {
       key: "export",
@@ -245,7 +261,19 @@ export default function GroupPanel() {
       key: "rename",
       icon: <EditOutlined />,
       label: "重命名",
-      onClick: () => setRenaming({ kind: "group", id: g.id, value: g.name }),
+      onClick: () => setRenaming({ kind: "group", field: "name", id: g.id, value: g.name }),
+    },
+    {
+      key: "note",
+      icon: <FileTextOutlined />,
+      label: g.params.note ? "编辑备注" : "添加备注",
+      onClick: () =>
+        setRenaming({
+          kind: "group",
+          field: "note",
+          id: g.id,
+          value: g.params.note,
+        }),
     },
     {
       key: "export",
@@ -274,10 +302,16 @@ export default function GroupPanel() {
 
   const handleRenameOk = () => {
     if (!renaming) return;
-    const name = renaming.value.trim();
-    if (name) {
-      if (renaming.kind === "test") renameTest(renaming.id, name);
-      else renameGroup(renaming.id, name);
+    const text = renaming.value;
+    if (renaming.field === "name") {
+      if (text.trim()) {
+        if (renaming.kind === "test") renameTest(renaming.id, text);
+        else renameGroup(renaming.id, text);
+      }
+    } else if (renaming.kind === "test") {
+      setTestNote(renaming.id, text);
+    } else {
+      setGroupNote(renaming.id, text);
     }
     setRenaming(null);
   };
@@ -530,50 +564,91 @@ export default function GroupPanel() {
                   menu={{ items: testMenu(t) }}
                   trigger={["contextMenu"]}
                 >
-                  <div
-                    onClick={() => {
-                      setActiveTest(t.id);
-                      setExpanded(isOpen ? -1 : t.id);
-                    }}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                      padding: "6px 8px",
-                      borderRadius: 6,
-                      cursor: "pointer",
-                      background: t.id === activeTestId ? "#e6f4ff" : "#fafafa",
-                      border:
-                        t.id === activeTestId
-                          ? "1px solid #91caff"
-                          : "1px solid transparent",
-                    }}
-                  >
-                    <span style={{ fontSize: 10, color: "#888" }}>
-                      {isOpen ? <DownOutlined /> : <RightOutlined />}
-                    </span>
-                    <span
-                      style={{
-                        fontWeight: 600,
-                        flex: 1,
-                        minWidth: 0,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
+                  <div>
+                    <Tooltip
+                      placement="right"
+                      mouseEnterDelay={0.4}
+                      title={
+                        <div style={{ fontSize: 12, maxWidth: 260 }}>
+                          <div style={{ fontWeight: 600 }}>{t.name}</div>
+                          <div>
+                            {fmtDateTime(at)} · {mine.length} 组 / {shots} 发
+                          </div>
+                          <div style={{ opacity: 0.85 }}>
+                            {t.note ? `备注 ${t.note}` : "右键可重命名 / 添加备注"}
+                          </div>
+                        </div>
+                      }
                     >
-                      {t.name}
-                    </span>
-                    <span
-                      style={{
-                        fontSize: 11,
-                        color: "#999",
-                        flexShrink: 0,
-                        fontVariantNumeric: "tabular-nums",
-                      }}
-                    >
-                      {fmtDateTime(at)} · {mine.length} 组 / {shots} 发
-                    </span>
+                      <div
+                        onClick={() => {
+                          setActiveTest(t.id);
+                          setExpanded(isOpen ? -1 : t.id);
+                        }}
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 3,
+                          padding: "6px 8px",
+                          borderRadius: 6,
+                          cursor: "pointer",
+                          background:
+                            t.id === activeTestId ? "#e6f4ff" : "#fafafa",
+                          border:
+                            t.id === activeTestId
+                              ? "1px solid #91caff"
+                              : "1px solid transparent",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                          }}
+                        >
+                          <span style={{ fontSize: 10, color: "#888" }}>
+                            {isOpen ? <DownOutlined /> : <RightOutlined />}
+                          </span>
+                          <span
+                            style={{
+                              fontWeight: 600,
+                              flex: 1,
+                              minWidth: 0,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {t.name}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 11,
+                              color: "#999",
+                              flexShrink: 0,
+                              fontVariantNumeric: "tabular-nums",
+                            }}
+                          >
+                            {fmtDateTime(at)} · {mine.length} 组 / {shots} 发
+                          </span>
+                        </div>
+                        {t.note && t.id === activeTestId && (
+                          <div
+                            style={{
+                              marginLeft: 16,
+                              fontSize: 11,
+                              lineHeight: 1.5,
+                              color: "#8c8c8c",
+                              whiteSpace: "pre-wrap",
+                              wordBreak: "break-word",
+                            }}
+                          >
+                            {t.note}
+                          </div>
+                        )}
+                      </div>
+                    </Tooltip>
                   </div>
                 </Dropdown>
                 {isOpen && (
@@ -596,99 +671,151 @@ export default function GroupPanel() {
                           menu={{ items: groupMenu(g) }}
                           trigger={["contextMenu"]}
                         >
-                          <div
-                            onClick={() => setViewingGroup(g.id)}
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 4,
-                              padding: "6px 8px",
-                              borderRadius: 6,
-                              cursor: "pointer",
-                              background:
-                                g.id === viewingGroupId ? "#e6f4ff" : "#fafafa",
-                              border:
-                                g.id === viewingGroupId
-                                  ? "1px solid #91caff"
-                                  : "1px solid transparent",
-                            }}
-                          >
-                            <span
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 6,
-                                flex: 1,
-                                minWidth: 0,
-                              }}
+                          <div>
+                            <Tooltip
+                              placement="right"
+                              mouseEnterDelay={0.4}
+                              title={
+                                <div style={{ fontSize: 12, maxWidth: 240 }}>
+                                  一级转速 {g.params.stage1_rpm || "--"} · 二级转速{" "}
+                                  {g.params.stage2_rpm || "--"}
+                                  <br />
+                                  PID {g.params.pid || "--"} · 压缩量{" "}
+                                  {g.params.compression || "--"} mm
+                                  <br />
+                                  硬度 {g.params.hardness || "--"}
+                                  <br />
+                                  备注 {g.params.note || "--"}
+                                </div>
+                              }
                             >
-                              <Checkbox
-                                checked={compareIds.includes(g.id)}
-                                onClick={(e) => e.stopPropagation()}
-                                onChange={() => toggleCompare(g.id)}
-                              />
-                              <span
+                              <div
+                                onClick={() => setViewingGroup(g.id)}
                                 style={{
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                  whiteSpace: "nowrap",
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  gap: 3,
+                                  padding: "6px 8px",
+                                  borderRadius: 6,
+                                  cursor: "pointer",
+                                  background:
+                                    g.id === viewingGroupId
+                                      ? "#e6f4ff"
+                                      : "#fafafa",
+                                  border:
+                                    g.id === viewingGroupId
+                                      ? "1px solid #91caff"
+                                      : "1px solid transparent",
                                 }}
                               >
-                                {g.name}
-                              </span>
-                              {g.id === activeGroupId && (
-                                <Badge
-                                  status="processing"
-                                  text={
-                                    <span
-                                      style={{ fontSize: 12, color: "#1677ff" }}
-                                    >
-                                      记录中
-                                    </span>
-                                  }
-                                />
-                              )}
-                            </span>
-                            <span
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 4,
-                                flexShrink: 0,
-                              }}
-                            >
-                              {g.dispersion && (
-                                <Tooltip title="该组已有散布分析数据">
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 4,
+                                  }}
+                                >
                                   <span
-                                    style={{ color: "#1677ff", fontSize: 12 }}
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: 6,
+                                      flex: 1,
+                                      minWidth: 0,
+                                    }}
                                   >
-                                    <AimOutlined />
-                                    {g.dispersion.points.length > 0
-                                      ? g.dispersion.points.length
-                                      : ""}
+                                    <Checkbox
+                                      checked={compareIds.includes(g.id)}
+                                      onClick={(e) => e.stopPropagation()}
+                                      onChange={() => toggleCompare(g.id)}
+                                    />
+                                    <span
+                                      style={{
+                                        overflow: "hidden",
+                                        textOverflow: "ellipsis",
+                                        whiteSpace: "nowrap",
+                                      }}
+                                    >
+                                      {g.name}
+                                    </span>
+                                    {g.id === activeGroupId && (
+                                      <Badge
+                                        status="processing"
+                                        text={
+                                          <span
+                                            style={{
+                                              fontSize: 12,
+                                              color: "#1677ff",
+                                            }}
+                                          >
+                                            记录中
+                                          </span>
+                                        }
+                                      />
+                                    )}
                                   </span>
-                                </Tooltip>
-                              )}
-                              <span style={{ color: "#999", fontSize: 12 }}>
-                                {g.shots.length} 发
-                              </span>
-                              <Popconfirm
-                                title={`删除「${g.name}」？`}
-                                description={`该组 ${g.shots.length} 发数据（含波形）将被删除`}
-                                okText="删除"
-                                okButtonProps={{ danger: true }}
-                                cancelText="取消"
-                                onConfirm={() => deleteGroup(g.id)}
-                              >
-                                <Button
-                                  size="small"
-                                  type="text"
-                                  danger
-                                  icon={<DeleteOutlined />}
-                                  onClick={(e) => e.stopPropagation()}
-                                />
-                              </Popconfirm>
-                            </span>
+                                  <span
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: 4,
+                                      flexShrink: 0,
+                                    }}
+                                  >
+                                    {g.dispersion && (
+                                      <Tooltip title="该组已有散布分析数据">
+                                        <span
+                                          style={{
+                                            color: "#1677ff",
+                                            fontSize: 12,
+                                          }}
+                                        >
+                                          <AimOutlined />
+                                          {g.dispersion.points.length > 0
+                                            ? g.dispersion.points.length
+                                            : ""}
+                                        </span>
+                                      </Tooltip>
+                                    )}
+                                    <span
+                                      style={{ color: "#999", fontSize: 12 }}
+                                    >
+                                      {g.shots.length} 发
+                                    </span>
+                                    <Popconfirm
+                                      title={`删除「${g.name}」？`}
+                                      description={`该组 ${g.shots.length} 发数据（含波形）将被删除`}
+                                      okText="删除"
+                                      okButtonProps={{ danger: true }}
+                                      cancelText="取消"
+                                      onConfirm={() => deleteGroup(g.id)}
+                                    >
+                                      <Button
+                                        size="small"
+                                        type="text"
+                                        danger
+                                        icon={<DeleteOutlined />}
+                                        onClick={(e) => e.stopPropagation()}
+                                      />
+                                    </Popconfirm>
+                                  </span>
+                                </div>
+                                {g.params.note && g.id === viewingGroupId && (
+                                  <div
+                                    style={{
+                                      marginLeft: 22,
+                                      fontSize: 11,
+                                      lineHeight: 1.5,
+                                      color: "#8c8c8c",
+                                      whiteSpace: "pre-wrap",
+                                      wordBreak: "break-word",
+                                    }}
+                                  >
+                                    {g.params.note}
+                                  </div>
+                                )}
+                              </div>
+                            </Tooltip>
                           </div>
                         </Dropdown>
                       ))
@@ -703,21 +830,43 @@ export default function GroupPanel() {
 
       <Modal
         open={renaming !== null}
-        title={renaming?.kind === "test" ? "重命名测试" : "重命名组"}
+        title={
+          renaming === null
+            ? ""
+            : `${renaming.field === "name" ? "重命名" : "备注"} · ${
+                renaming.kind === "test"
+                  ? tests.find((x) => x.id === renaming.id)?.name ?? ""
+                  : groups.find((x) => x.id === renaming.id)?.name ?? ""
+              }`
+        }
         okText="保存"
         cancelText="取消"
         onOk={handleRenameOk}
         onCancel={() => setRenaming(null)}
       >
-        <Input
-          value={renaming?.value ?? ""}
-          autoFocus
-          onChange={(e) =>
-            setRenaming((r) => (r ? { ...r, value: e.target.value } : r))
-          }
-          onPressEnter={handleRenameOk}
-          placeholder="输入新名称"
-        />
+        {renaming?.field === "name" ? (
+          <Input
+            value={renaming.value}
+            autoFocus
+            onChange={(e) =>
+              setRenaming((r) => (r ? { ...r, value: e.target.value } : r))
+            }
+            onPressEnter={handleRenameOk}
+            placeholder="输入新名称"
+          />
+        ) : (
+          <Input.TextArea
+            value={renaming?.value ?? ""}
+            autoFocus
+            rows={3}
+            maxLength={200}
+            showCount
+            placeholder="选填，例如：普通弹丸 / 新摩擦轮 / 环境温度 25℃"
+            onChange={(e) =>
+              setRenaming((r) => (r ? { ...r, value: e.target.value } : r))
+            }
+          />
+        )}
       </Modal>
 
       <CompareModal open={compareOpen} onClose={() => setCompareOpen(false)} />

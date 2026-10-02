@@ -74,6 +74,8 @@ export interface GroupParams {
 export interface TestSession {
   id: number;
   name: string;
+  /** 备注（选填，为空时不写盘） */
+  note?: string;
   /** 创建时间 */
   createdAt: number;
   /** 该测试的起始时间（迁移旧数据时取最早一发的接收时间） */

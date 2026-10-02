@@ -71,6 +71,34 @@ describe("会话序列化", () => {
     waveConfig: { groups: [{ id: 1, name: "一级", channels: [0, 2] }], channelLabels: { 0: "一1" } },
   };
 
+  it("测试备注随文件往返，旧文件无备注字段也能读", () => {
+    const withNote = {
+      ...session,
+      tests: [{ ...session.tests[0], note: "普通弹 13mm，室温 25℃" }],
+    };
+    const back = deserializeSession(JSON.stringify(serializeSession(withNote)));
+    expect(back.tests[0].note).toBe("普通弹 13mm，室温 25℃");
+    // 没有备注字段的老文件读出来是 undefined，不报错
+    expect(
+      deserializeSession(JSON.stringify(serializeSession(session))).tests[0]
+        .note
+    ).toBeUndefined();
+  });
+
+  it("导入时测试备注跟着测试一起进来", () => {
+    const incoming = {
+      ...session,
+      tests: [{ ...session.tests[0], id: 9, name: "夜间测试", note: "新摩擦轮" }],
+      groups: [{ ...group(7, "组1", false), testId: 9 }],
+    };
+    const merged = mergeImported(
+      { tests: [], groups: [] },
+      { tests: incoming.tests, groups: incoming.groups },
+      { nextTestId: 1, nextGroupId: 1 }
+    );
+    expect(merged.tests[0].note).toBe("新摩擦轮");
+  });
+
   it("往返保留组/发/波形", () => {
     const text = JSON.stringify(serializeSession(session));
     const back = deserializeSession(text);

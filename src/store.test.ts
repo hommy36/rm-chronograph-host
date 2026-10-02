@@ -171,6 +171,24 @@ describe("测试 → 组 两级结构", () => {
     expect(st().viewingGroupId).toBeNull();
   });
 
+  it("备注可写入测试与组，清空后测试不留空字段", () => {
+    const st = () => useAppStore.getState();
+    const t = st().startTest();
+    st().startGroup({ ...EMPTY_PARAMS, note: "建组时写的备注" });
+    const g = st().groups[0];
+    expect(g.params.note).toBe("建组时写的备注");
+
+    st().setTestNote(t, "  设备 A，室温 25℃  ");
+    expect(st().tests[0].note).toBe("设备 A，室温 25℃");
+    st().setGroupNote(g.id, "换新摩擦轮");
+    expect(st().groups[0].params.note).toBe("换新摩擦轮");
+
+    st().setTestNote(t, "   ");
+    expect(st().tests[0].note).toBeUndefined();
+    st().setGroupNote(g.id, "");
+    expect(st().groups[0].params.note).toBe("");
+  });
+
   it("没有测试时点开始新组会自动建测试", () => {
     const st = () => useAppStore.getState();
     expect(st().tests).toHaveLength(0);
