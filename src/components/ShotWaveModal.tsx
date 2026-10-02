@@ -274,11 +274,17 @@ export default function ShotWaveModal(props: {
               ))}
             </Space>
           )}
+          {hideFlat && rows.some((r) => r.flat) && (
+            <div style={{ fontSize: 12, color: "#999", padding: "0 0 4px 2px" }}>
+              已隐藏 {rows.filter((r) => r.flat).length} 个平直通道（全程无变化，
+              掉速量恒为 0）；关掉「隐藏平直通道」可查看
+            </div>
+          )}
           <Table<Row>
             size="small"
             rowKey="key"
             pagination={false}
-            dataSource={rows}
+            dataSource={hideFlat ? rows.filter((r) => !r.flat) : rows}
             columns={[
               {
                 title: "轮子",
