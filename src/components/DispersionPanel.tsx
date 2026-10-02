@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Card,
+  Checkbox,
   ColorPicker,
   Divider,
   Input,
@@ -25,6 +26,7 @@ import {
   FileImageOutlined,
   FileTextOutlined,
   ScissorOutlined,
+  SettingOutlined,
   UndoOutlined,
   UploadOutlined,
   ZoomInOutlined,
@@ -239,6 +241,47 @@ interface SigmaEllipse {
   ry: number;
 }
 
+/** 分析叠加里可单独开关的图层 */
+export type OverlayLayer =
+  | "ringScore"
+  | "center"
+  | "rings"
+  | "small"
+  | "large"
+  | "dart"
+  | "mec";
+
+export type OverlayFlags = Record<OverlayLayer, boolean>;
+
+export const OVERLAY_LAYERS: {
+  key: OverlayLayer;
+  label: string;
+  color?: string;
+  hint: string;
+}[] = [
+  {
+    key: "ringScore",
+    label: "弹孔环数",
+    hint: "在每个弹孔旁标出它到弹着中心的环数",
+  },
+  { key: "center", label: "弹着中心十字", hint: "当前用的弹着中心（点群中心或图片中心）" },
+  { key: "rings", label: "环数同心圆", hint: `以中心为圆心，每 ${RING_WIDTH_MM} mm 一环、共 ${RING_COUNT} 环` },
+  { key: "small", label: "小装甲板", color: COLORS.small, hint: "小装甲板尺寸框（判定命中率用同一尺寸）" },
+  { key: "large", label: "大装甲板", color: COLORS.large, hint: "大装甲板尺寸框" },
+  { key: "dart", label: "飞镖靶", color: COLORS.dart, hint: "飞镖靶尺寸框" },
+  { key: "mec", label: "最小包围圆", color: COLORS.mec, hint: "包住全部弹孔的最小圆" },
+];
+
+export const DEFAULT_OVERLAY: OverlayFlags = {
+  ringScore: true,
+  center: true,
+  rings: true,
+  small: true,
+  large: true,
+  dart: true,
+  mec: true,
+};
+
 /** 场景绘制：图像 + 弹孔 + （可选）分析叠加 + 文字（图像像素坐标系） */
 function drawScene(
   ctx: CanvasRenderingContext2D,
@@ -248,6 +291,8 @@ function drawScene(
   analysis: Analysis | null,
   mmPerPx: number,
   showOverlay: boolean,
+  /** 叠加图层开关（只对开启的图层绘制） */
+  layers: OverlayFlags,
   /** 1σ/2σ 散布椭圆（可选叠加） */
   sigma?: SigmaEllipse | null
 ) {
@@ -260,7 +305,7 @@ function drawScene(
     ctx.arc(p.x, p.y, Math.max(3, fontPx / 5), 0, Math.PI * 2);
     ctx.fillStyle = COLORS.point;
     ctx.fill();
-    if (analysis && showOverlay) {
+    if (analysis && showOverlay && layers.ringScore) {
       const dMm =
         Math.hypot(p.x - analysis.center.x, p.y - analysis.center.y) * mmPerPx;
       ctx.font = `${fontPx * 0.8}px sans-serif`;
@@ -291,41 +336,44 @@ function drawScene(
 
   if (analysis && showOverlay) {
     const { center } = analysis;
-    // 中心十字
-    ctx.strokeStyle = COLORS.center;
-    ctx.lineWidth = Math.max(1.5, fontPx / 10);
     const arm = fontPx;
-    ctx.beginPath();
-    ctx.moveTo(center.x - arm, center.y);
-    ctx.lineTo(center.x + arm, center.y);
-    ctx.moveTo(center.x, center.y - arm);
-    ctx.lineTo(center.x, center.y + arm);
-    ctx.stroke();
-    ctx.font = `${fontPx * 0.75}px sans-serif`;
-    ctx.fillStyle = COLORS.center;
-    ctx.fillText("center", center.x + arm * 0.4, center.y + arm);
-
-    // 9 环同心圆
-    ctx.strokeStyle = COLORS.ring;
-    ctx.lineWidth = Math.max(1, fontPx / 14);
-    for (let i = 1; i <= RING_COUNT; i++) {
+    if (layers.center) {
+      // 中心十字
+      ctx.strokeStyle = COLORS.center;
+      ctx.lineWidth = Math.max(1.5, fontPx / 10);
       ctx.beginPath();
-      ctx.arc(
-        center.x,
-        center.y,
-        (i * RING_WIDTH_MM) / mmPerPx,
-        0,
-        Math.PI * 2
-      );
+      ctx.moveTo(center.x - arm, center.y);
+      ctx.lineTo(center.x + arm, center.y);
+      ctx.moveTo(center.x, center.y - arm);
+      ctx.lineTo(center.x, center.y + arm);
       ctx.stroke();
+      ctx.font = `${fontPx * 0.75}px sans-serif`;
+      ctx.fillStyle = COLORS.center;
+      ctx.fillText("center", center.x + arm * 0.4, center.y + arm);
     }
 
-    // 三种装甲框
-    const frames = [
-      { spec: ARMOR.small, color: COLORS.small },
-      { spec: ARMOR.large, color: COLORS.large },
-      { spec: ARMOR.dart, color: COLORS.dart },
-    ];
+    if (layers.rings) {
+      // 9 环同心圆
+      ctx.strokeStyle = COLORS.ring;
+      ctx.lineWidth = Math.max(1, fontPx / 14);
+      for (let i = 1; i <= RING_COUNT; i++) {
+        ctx.beginPath();
+        ctx.arc(
+          center.x,
+          center.y,
+          (i * RING_WIDTH_MM) / mmPerPx,
+          0,
+          Math.PI * 2
+        );
+        ctx.stroke();
+      }
+    }
+
+    // 装甲框：按勾选取舍（判定命中率用的尺寸与这里一致）
+    const frames: { spec: { w: number; h: number }; color: string }[] = [];
+    if (layers.small) frames.push({ spec: ARMOR.small, color: COLORS.small });
+    if (layers.large) frames.push({ spec: ARMOR.large, color: COLORS.large });
+    if (layers.dart) frames.push({ spec: ARMOR.dart, color: COLORS.dart });
     for (const f of frames) {
       const hw = f.spec.w / mmPerPx / 2;
       const hh = f.spec.h / mmPerPx / 2;
@@ -334,18 +382,20 @@ function drawScene(
       ctx.strokeRect(center.x - hw, center.y - hh, hw * 2, hh * 2);
     }
 
-    // 最小包围圆
-    ctx.strokeStyle = COLORS.mec;
-    ctx.lineWidth = Math.max(2, fontPx / 9);
-    ctx.beginPath();
-    ctx.arc(
-      analysis.mec.center.x,
-      analysis.mec.center.y,
-      analysis.mec.radius,
-      0,
-      Math.PI * 2
-    );
-    ctx.stroke();
+    if (layers.mec) {
+      // 最小包围圆
+      ctx.strokeStyle = COLORS.mec;
+      ctx.lineWidth = Math.max(2, fontPx / 9);
+      ctx.beginPath();
+      ctx.arc(
+        analysis.mec.center.x,
+        analysis.mec.center.y,
+        analysis.mec.radius,
+        0,
+        Math.PI * 2
+      );
+      ctx.stroke();
+    }
   }
 
   // 文本标注
@@ -419,6 +469,10 @@ export default function DispersionPanel(props: { onBack: () => void }) {
   const [centerMode, setCenterMode] = useState<"points" | "image">("points");
   const [cropOpen, setCropOpen] = useState(false);
   const [showOverlay, setShowOverlay] = useState(false);
+  const [overlayLayers, setOverlayLayers] = useState<OverlayFlags>({
+    ...DEFAULT_OVERLAY,
+  });
+  const [overlayPopOpen, setOverlayPopOpen] = useState(false);
   const [showSigma, setShowSigma] = useState(false);
   const [placingText, setPlacingText] = useState(false);
   const [textPopOpen, setTextPopOpen] = useState(false);
@@ -670,6 +724,7 @@ export default function DispersionPanel(props: { onBack: () => void }) {
       analysis,
       mmPerPx,
       showOverlay,
+      overlayLayers,
       showSigma && analysis && geo
         ? {
             cx: analysis.center.x,
@@ -689,6 +744,7 @@ export default function DispersionPanel(props: { onBack: () => void }) {
     natural.h,
     mmPerPx,
     showOverlay,
+    overlayLayers,
     showSigma,
     geo,
   ]);
@@ -785,6 +841,7 @@ export default function DispersionPanel(props: { onBack: () => void }) {
         analysis,
         mmPerPx,
         showOverlay,
+        overlayLayers,
         showSigma && analysis && geo
           ? {
               cx: analysis.center.x,
@@ -941,6 +998,83 @@ export default function DispersionPanel(props: { onBack: () => void }) {
       </div>
       <div style={{ fontSize: 11, color: "#999", marginTop: 8, lineHeight: 1.5 }}>
         「局部对比」是让浅色落点变明显的关键；纸面纹理较重时调低它、提高「对比度」。
+      </div>
+    </div>
+  );
+
+  const overlayControls = (
+    <div style={{ width: 250 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 6,
+        }}
+      >
+        <span style={{ fontSize: 12, color: "#888" }}>叠加哪些内容</span>
+        <Space size={2}>
+          <Button
+            size="small"
+            type="link"
+            style={{ padding: 0, fontSize: 12 }}
+            onClick={() => setOverlayLayers({ ...DEFAULT_OVERLAY })}
+          >
+            全选
+          </Button>
+          <Button
+            size="small"
+            type="link"
+            style={{ padding: 0, fontSize: 12 }}
+            onClick={() =>
+              setOverlayLayers({
+                ringScore: false,
+                center: false,
+                rings: false,
+                small: false,
+                large: false,
+                dart: false,
+                mec: false,
+              })
+            }
+          >
+            全不选
+          </Button>
+        </Space>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+        {OVERLAY_LAYERS.map((l) => (
+          <Tooltip key={l.key} title={l.hint} placement="right">
+            <Checkbox
+              checked={overlayLayers[l.key]}
+              onChange={(e) =>
+                setOverlayLayers((cur) => ({
+                  ...cur,
+                  [l.key]: e.target.checked,
+                }))
+              }
+            >
+              <span style={{ fontSize: 12 }}>
+                {l.color && (
+                  <span
+                    style={{
+                      display: "inline-block",
+                      width: 8,
+                      height: 8,
+                      borderRadius: 2,
+                      background: l.color,
+                      marginRight: 6,
+                    }}
+                  />
+                )}
+                {l.label}
+              </span>
+            </Checkbox>
+          </Tooltip>
+        ))}
+      </div>
+      <div style={{ fontSize: 11, color: "#bbb", marginTop: 8 }}>
+        装甲命中率与各项指标始终按全部装甲板尺寸计算，不受勾选影响
       </div>
     </div>
   );
@@ -1161,6 +1295,22 @@ export default function DispersionPanel(props: { onBack: () => void }) {
             <span style={{ fontSize: 12, color: "#888" }}>分析叠加</span>
           </Space>
         </Tooltip>
+        <Popover
+          content={overlayControls}
+          trigger="click"
+          placement="bottomRight"
+          open={overlayPopOpen}
+          onOpenChange={setOverlayPopOpen}
+        >
+          <Button
+            size="small"
+            type={showOverlay ? "default" : "text"}
+            icon={<SettingOutlined />}
+            disabled={!analysis}
+          >
+            叠加项
+          </Button>
+        </Popover>
         <Tooltip title="以弹着中心为中心画 1σ / 2σ 椭圆（半轴为水平/垂直标准差），看散布形状">
           <Space size={4}>
             <Switch
