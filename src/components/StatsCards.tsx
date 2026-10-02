@@ -38,10 +38,12 @@ export default function StatsCards({ view, onChangeView }: StatsCardsProps) {
     <Card
       size="small"
       title={group ? `统计 — ${group.name}` : "统计"}
+      data-tour="stats-cards"
       extra={
         <Space size={8}>
           <Button
             size="small"
+            data-tour="view-details"
             icon={<UnorderedListOutlined />}
             disabled={!group || group.shots.length === 0}
             onClick={() =>
@@ -52,6 +54,7 @@ export default function StatsCards({ view, onChangeView }: StatsCardsProps) {
           </Button>
           <Button
             size="small"
+            data-tour="view-dispersion"
             icon={<AimOutlined />}
             onClick={() =>
               onChangeView(view === "dispersion" ? "charts" : "dispersion")
@@ -61,6 +64,7 @@ export default function StatsCards({ view, onChangeView }: StatsCardsProps) {
           </Button>
           <Button
             size="small"
+            data-tour="view-overview"
             icon={<FundViewOutlined />}
             disabled={groups.length === 0}
             onClick={() => onChangeView(view === "overview" ? "charts" : "overview")}

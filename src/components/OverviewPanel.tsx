@@ -116,6 +116,7 @@ export default function OverviewPanel() {
 
   return (
     <Card
+      data-tour="overview-list"
       size="small"
       title={
         <Space size={8}>

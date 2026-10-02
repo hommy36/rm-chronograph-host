@@ -59,6 +59,7 @@ export default function ShotsTable() {
     <Card
       size="small"
       title={group ? `弹速明细 — ${group.name}` : "弹速明细"}
+      data-tour="shots-table"
       style={{ height: "100%", display: "flex", flexDirection: "column" }}
       styles={{ body: { flex: 1, minHeight: 0, overflow: "auto", padding: 0 } }}
       extra={

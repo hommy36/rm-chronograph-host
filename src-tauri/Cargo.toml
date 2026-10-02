@@ -1,6 +1,6 @@
 [package]
 name = "rm_chronograph_host"
-version = "0.8.0"
+version = "0.9.0"
 description = "RoboMaster 摩擦轮测速模块上位机：弹速采集、分组统计、掉速分析与靶纸散布分析"
 authors = ["XianYu_in_oven <hm201805@163.com>"]
 edition = "2021"

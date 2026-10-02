@@ -265,7 +265,7 @@ export default function ChartsGrid() {
 
   if (!group || speeds.length === 0) {
     return (
-      <Card style={{ height: "100%", minWidth: 0 }}>
+      <Card style={{ height: "100%", minWidth: 0 }} data-tour="charts-grid">
         <Empty
           description="暂无数据：连接设备或打开「模拟数据」，收到测速帧后自动绘图"
           style={{ marginTop: 80 }}
@@ -299,6 +299,7 @@ export default function ChartsGrid() {
 
   return (
     <div
+      data-tour="charts-grid"
       style={{
         display: "grid",
         gridTemplateColumns: "1fr 1fr",

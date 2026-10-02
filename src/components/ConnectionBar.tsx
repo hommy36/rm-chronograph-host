@@ -128,49 +128,59 @@ export default function ConnectionBar(props: {
       <span style={{ fontWeight: 600, fontSize: 16, whiteSpace: "nowrap" }}>
         测速模块上位机
       </span>
-      <Select
-        style={{ width: 190 }}
-        placeholder={isTauri() ? "测速口" : "桌面 App 中可用"}
-        value={selected}
-        onChange={setSelected}
-        disabled={connected || props.demoOn || !isTauri()}
-        options={ports.map((p) => ({
-          value: p.name,
-          label: `${p.name}（${p.description}）`,
-          disabled: p.name === wavePortName,
-        }))}
-        notFoundContent="未发现串口"
-      />
-      <Tooltip title="刷新串口列表">
-        <Button
-          icon={<ReloadOutlined />}
-          onClick={refresh}
+      <span
+        data-tour="conn-serial"
+        style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+      >
+        <Select
+          style={{ width: 190 }}
+          placeholder={isTauri() ? "测速口" : "桌面 App 中可用"}
+          value={selected}
+          onChange={setSelected}
           disabled={connected || props.demoOn || !isTauri()}
+          options={ports.map((p) => ({
+            value: p.name,
+            label: `${p.name}（${p.description}）`,
+            disabled: p.name === wavePortName,
+          }))}
+          notFoundContent="未发现串口"
         />
-      </Tooltip>
-      {connected && !props.demoOn ? (
-        <Button danger onClick={handleDisconnect} loading={busy}>
-          断开
-        </Button>
-      ) : (
-        <Button
-          type="primary"
-          icon={<LinkOutlined />}
-          onClick={handleConnect}
-          loading={busy}
-          disabled={!selected || props.demoOn || !isTauri()}
-        >
-          连接
-        </Button>
-      )}
-      <Space size={4} style={{ whiteSpace: "nowrap" }}>
-        <span>模拟数据</span>
-        <Switch
-          checked={props.demoOn}
-          onChange={props.onToggleDemo}
-          disabled={connected && !props.demoOn}
-        />
-      </Space>
+        <Tooltip title="刷新串口列表">
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={refresh}
+            disabled={connected || props.demoOn || !isTauri()}
+          />
+        </Tooltip>
+        {connected && !props.demoOn ? (
+          <Button danger onClick={handleDisconnect} loading={busy}>
+            断开
+          </Button>
+        ) : (
+          <Button
+            type="primary"
+            icon={<LinkOutlined />}
+            onClick={handleConnect}
+            loading={busy}
+            disabled={!selected || props.demoOn || !isTauri()}
+          >
+            连接
+          </Button>
+        )}
+      </span>
+      <span
+        data-tour="conn-demo"
+        style={{ display: "inline-flex", alignItems: "center" }}
+      >
+        <Space size={4} style={{ whiteSpace: "nowrap" }}>
+          <span>模拟数据</span>
+          <Switch
+            checked={props.demoOn}
+            onChange={props.onToggleDemo}
+            disabled={connected && !props.demoOn}
+          />
+        </Space>
+      </span>
       <span style={{ whiteSpace: "nowrap" }}>{status}</span>
       <Tooltip
         title={`数据帧 ${counters.frames} · 心跳 ${counters.heartbeats} · CRC校验失败 ${counters.crcErrors}${portName ? ` · ${portName}` : ""}`}
@@ -180,53 +190,62 @@ export default function ConnectionBar(props: {
         </span>
       </Tooltip>
       <Divider type="vertical" />
-      <Select
-        style={{ width: 190 }}
-        placeholder={isTauri() ? "波形口 (JustFloat)" : "桌面 App 中可用"}
-        value={waveSelected}
-        onChange={setWaveSelected}
-        disabled={waveConnected || !isTauri()}
-        options={ports.map((p) => ({
-          value: p.name,
-          label: `${p.name}（${p.description}）`,
-          disabled: p.name === portName,
-        }))}
-        notFoundContent="未发现串口"
-      />
-      <Tooltip title="波形口波特率">
+      <span
+        data-tour="conn-wave"
+        style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+      >
         <Select
-          style={{ width: 104 }}
-          value={waveBaud}
-          onChange={(v) => {
-            setWaveBaud(v);
-            try {
-              localStorage.setItem(WAVE_BAUD_KEY, String(v));
-            } catch {
-              // 忽略持久化失败
-            }
-          }}
+          style={{ width: 190 }}
+          placeholder={isTauri() ? "波形口 (JustFloat)" : "桌面 App 中可用"}
+          value={waveSelected}
+          onChange={setWaveSelected}
           disabled={waveConnected || !isTauri()}
-          options={WAVE_BAUDS.map((b) => ({ value: b, label: String(b) }))}
+          options={ports.map((p) => ({
+            value: p.name,
+            label: `${p.name}（${p.description}）`,
+            disabled: p.name === portName,
+          }))}
+          notFoundContent="未发现串口"
         />
-      </Tooltip>
-      {waveConnected ? (
-        <Button danger onClick={handleWaveDisconnect} loading={waveBusy}>
-          断开
-        </Button>
-      ) : (
-        <Tooltip title="连接波形口（VOFA+ JustFloat 摩擦轮转速）">
-          <Button
-            icon={<LinkOutlined />}
-            onClick={handleWaveConnect}
-            loading={waveBusy}
-            disabled={!waveSelected || !isTauri()}
-          >
-            连接
-          </Button>
+        <Tooltip title="波形口波特率">
+          <Select
+            style={{ width: 104 }}
+            value={waveBaud}
+            onChange={(v) => {
+              setWaveBaud(v);
+              try {
+                localStorage.setItem(WAVE_BAUD_KEY, String(v));
+              } catch {
+                // 忽略持久化失败
+              }
+            }}
+            disabled={waveConnected || !isTauri()}
+            options={WAVE_BAUDS.map((b) => ({ value: b, label: String(b) }))}
+          />
         </Tooltip>
-      )}
+        {waveConnected ? (
+          <Button danger onClick={handleWaveDisconnect} loading={waveBusy}>
+            断开
+          </Button>
+        ) : (
+          <Tooltip title="连接波形口（VOFA+ JustFloat 摩擦轮转速）">
+            <Button
+              icon={<LinkOutlined />}
+              onClick={handleWaveConnect}
+              loading={waveBusy}
+              disabled={!waveSelected || !isTauri()}
+            >
+              连接
+            </Button>
+          </Tooltip>
+        )}
+      </span>
       <Tooltip title="波形通道设置（通道→摩擦轮组）">
-        <Button icon={<SettingOutlined />} onClick={() => setSettingsOpen(true)} />
+        <Button
+          data-tour="conn-wave-settings"
+          icon={<SettingOutlined />}
+          onClick={() => setSettingsOpen(true)}
+        />
       </Tooltip>
       {waveConnected && (
         <Tooltip title={`波形通道数 ${waveChannelCount} · 波形帧 ${waveFrames}${wavePortName ? ` · ${wavePortName}` : ""}`}>

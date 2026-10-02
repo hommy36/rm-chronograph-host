@@ -15,6 +15,14 @@ import StatsCards from "./components/StatsCards";
 import ShotsTable from "./components/ShotsTable";
 import DispersionPanel from "./components/DispersionPanel";
 import OverviewPanel from "./components/OverviewPanel";
+import {
+  GuideButton,
+  OnboardingTour,
+  WelcomeModal,
+  hasOnboarded,
+  markOnboarded,
+} from "./onboarding";
+import { addDemoProject } from "./demo";
 import type { MainView } from "./types";
 import "./App.css";
 
@@ -59,27 +67,33 @@ function useOfflineWatchdog() {
   }, []);
 }
 
-/** 会话持久化：启动载入历史数据 + 变更后去抖 2s 自动落盘 */
-function useSessionPersistence() {
+/**
+ * 会话持久化：启动载入历史数据 + 变更后去抖 2s 自动落盘。
+ * 没有任何历史数据时（第一次用）回调 onNoData，交给界面弹欢迎框。
+ */
+function useSessionPersistence(onNoData: () => void) {
   const [loadedInfo, setLoadedInfo] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isTauri()) return;
     let alive = true;
     (async () => {
-      const data = await loadSession();
-      if (!alive || !data || data.groups.length === 0) return;
-      useAppStore.getState().hydrate(data);
-      setLoadedInfo(
-        `已载入 ${data.groups.length} 组历史数据（保存于 ${new Date(
-          data.savedAt
-        ).toLocaleString()}）`
-      );
+      const data = isTauri() ? await loadSession() : null;
+      if (!alive) return;
+      if (data && data.groups.length > 0) {
+        useAppStore.getState().hydrate(data);
+        setLoadedInfo(
+          `已载入 ${data.groups.length} 组历史数据（保存于 ${new Date(
+            data.savedAt
+          ).toLocaleString()}）`
+        );
+      } else if (!hasOnboarded()) {
+        onNoData();
+      }
     })();
     return () => {
       alive = false;
     };
-  }, []);
+  }, [onNoData]);
 
   useEffect(() => {
     if (loadedInfo) message.success(loadedInfo, 5);
@@ -141,14 +155,44 @@ function useGlobalDropGuard() {
 }
 
 export default function App() {
-  useSerialEvents();
-  useOfflineWatchdog();
-  useSessionPersistence();
-  useGlobalDropGuard();
-
   const [demoOn, setDemoOn] = useState(false);
   const [view, setView] = useState<MainView>("charts");
+  const [welcomeOpen, setWelcomeOpen] = useState(false);
+  const [welcomeBusy, setWelcomeBusy] = useState(false);
+  const [tourOpen, setTourOpen] = useState(false);
   const simulatorRef = useRef<Simulator | null>(null);
+
+  /** 第一次用（没历史数据）→ 弹欢迎框 */
+  const handleNoData = useRef(() => setWelcomeOpen(true)).current;
+
+  useSerialEvents();
+  useOfflineWatchdog();
+  useSessionPersistence(handleNoData);
+  useGlobalDropGuard();
+
+  /** 欢迎框：载入（可选）示例数据后直接开引导 */
+  const startWelcome = async (withDemo: boolean) => {
+    markOnboarded();
+    setWelcomeOpen(false);
+    if (withDemo) {
+      setWelcomeBusy(true);
+      try {
+        const id = await addDemoProject();
+        if (id === null) message.warning("示例数据没能并入，请稍后重试");
+      } catch (e) {
+        message.error(`载入示例数据失败：${e}`, 6);
+      } finally {
+        setWelcomeBusy(false);
+      }
+    }
+    setView("charts");
+    setTourOpen(true);
+  };
+
+  const skipWelcome = () => {
+    markOnboarded();
+    setWelcomeOpen(false);
+  };
 
   const toggleDemo = (on: boolean) => {
     const store = useAppStore.getState();
@@ -210,6 +254,11 @@ export default function App() {
           >
             <ConnectionBar demoOn={demoOn} onToggleDemo={toggleDemo} />
           </div>
+          <div
+            style={{ display: "flex", alignItems: "center", paddingRight: 4 }}
+          >
+            <GuideButton onStartTour={() => setTourOpen(true)} />
+          </div>
           <WindowControls />
         </div>
       </Header>
@@ -264,6 +313,18 @@ export default function App() {
           </div>
         </Content>
       </Layout>
+      <OnboardingTour
+        open={tourOpen}
+        view={view}
+        onActivateView={setView}
+        onClose={() => setTourOpen(false)}
+      />
+      <WelcomeModal
+        open={welcomeOpen}
+        busy={welcomeBusy}
+        onStart={startWelcome}
+        onSkip={skipWelcome}
+      />
     </Layout>
   );
 }

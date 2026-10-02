@@ -19,7 +19,12 @@ export default function LiveSpeedCard() {
   const color = !connected ? "#bbb" : online ? "#1677ff" : "#d4380d";
 
   return (
-    <Card size="small" title="实时弹速" style={{ marginBottom: 12 }}>
+    <Card
+      size="small"
+      title="实时弹速"
+      style={{ marginBottom: 12 }}
+      data-tour="live-speed"
+    >
       <div style={{ textAlign: "center", padding: "4px 0" }}>
         <div
           style={{

@@ -356,7 +356,10 @@ export default function GroupPanel() {
       }}
     >
       {/* 参数表单：标签内嵌输入框，各行对齐 */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div
+        data-tour="group-params"
+        style={{ display: "flex", flexDirection: "column", gap: 8 }}
+      >
         {FIELDS.map((f) => (
           <Input
             key={f.key}
@@ -445,6 +448,7 @@ export default function GroupPanel() {
 
       {/* 测试记录工具栏 */}
       <div
+        data-tour="test-toolbar"
         style={{
           display: "flex",
           justifyContent: "space-between",
@@ -473,6 +477,7 @@ export default function GroupPanel() {
           </Tooltip>
           <Tooltip title="导出全部测试 (.rmtest)">
             <Button
+              data-tour="export-all"
               size="small"
               type="text"
               icon={<ExportOutlined />}
@@ -546,6 +551,7 @@ export default function GroupPanel() {
         </div>
       ) : (
         <div
+          data-tour="group-list"
           style={{
             display: "flex",
             flexDirection: "column",

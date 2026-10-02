@@ -1192,6 +1192,7 @@ export default function DispersionPanel(props: { onBack: () => void }) {
     >
       {/* 工具栏：分组单行 */}
       <div
+        data-tour="dispersion-tools"
         style={{
           display: "flex",
           alignItems: "center",

@@ -78,6 +78,7 @@ export default function CrossGroupCard() {
 
   return (
     <Card
+      data-tour="overview-timeline"
       size="small"
       title={
         <Space size={8}>
