@@ -3,6 +3,7 @@
  * 产出可直接写进文档的结论指标。全部纯函数，vitest 覆盖。
  */
 import { computeStats } from "./stats";
+import { score as ringScore } from "./dispersion/math";
 import { reportShotWave } from "./wave";
 import type { Group, GroupParams, WaveConfig } from "./types";
 
@@ -124,6 +125,8 @@ export function dispersionGeometry(
   const angleDeg = (Math.atan2(my, mx) * 180) / Math.PI; // y 向下为正
   const lo = Math.min(cx, cy);
   const hi = Math.max(cx, cy);
+  // 平均环数：以弹着中心为基准（点已是 mm 坐标，mmPerPx 传 1）
+  const meanRing = ringScore(pointsMm, { x: mx, y: my }, 1);
   return {
     n,
     dx: mx,
@@ -134,7 +137,7 @@ export function dispersionGeometry(
     cy,
     aspect: lo > 1e-9 ? hi / lo : 1,
     r50,
-    meanRing: null,
+    meanRing,
   };
 }
 
@@ -364,10 +367,10 @@ export interface GroupSummaryRow {
   std: number | null;
   /** 变异系数 % = std/mean*100 */
   cv: number | null;
-  /** 落在目标 ±0.5% / ±1% / ±2% 的比例 */
-  pass05: number | null;
-  pass1: number | null;
-  pass2: number | null;
+  /** 落在「目标 ±tolPct%」内的比例（容差由调用方给定） */
+  pass: number | null;
+  /** 计算 pass 时使用的容差（%） */
+  tolPct: number;
   outlierCount: number;
   /** 趋势，m/s 每发 */
   trend: number | null;
@@ -386,11 +389,12 @@ export function groupSummary(
   g: Group,
   waveCfg: WaveConfig,
   dispersionPointsMm: { x: number; y: number }[] | null,
-  opts: { target?: number | null } = {}
+  opts: { target?: number | null; tolPct?: number } = {}
 ): GroupSummaryRow {
   const values = g.shots.map((s) => s.speed_mps);
   const s = computeStats(values);
   const target = opts.target ?? (s ? s.mean : null);
+  const tolPct = opts.tolPct ?? 1;
   const geo = dispersionPointsMm ? dispersionGeometry(dispersionPointsMm) : null;
 
   // 摩擦轮：该组所有发、所有通道的平均掉速%
@@ -424,9 +428,8 @@ export function groupSummary(
     range: s ? s.range : null,
     std: s ? s.std : null,
     cv: s && s.mean !== 0 ? (s.std / Math.abs(s.mean)) * 100 : null,
-    pass05: passRate(values, target, 0.5),
-    pass1: passRate(values, target, 1),
-    pass2: passRate(values, target, 2),
+    pass: passRate(values, target, tolPct),
+    tolPct,
     outlierCount: outliers(values).length,
     trend: trendSlope(values),
     hotGun: hotGunDelta(values),

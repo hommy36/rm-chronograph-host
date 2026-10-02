@@ -242,8 +242,7 @@ export function buildOverviewCsv(
     head.join(","),
   ];
   for (const r of rows) {
-    const pass =
-      tolPct === 0.5 ? r.pass05 : tolPct === 2 ? r.pass2 : r.pass1;
+    const pass = r.pass;
     lines.push(
       [
         cell(r.name),

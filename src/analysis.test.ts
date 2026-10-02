@@ -92,6 +92,30 @@ describe("dispersionGeometry", () => {
   it("空点集返回 null", () => {
     expect(dispersionGeometry([])).toBeNull();
   });
+
+  it("算出平均环数（以弹着中心为基准，每 14mm 一环）", () => {
+    // 全部落在弹着中心 → 满环 10
+    const center = dispersionGeometry([
+      { x: 0, y: 0 },
+      { x: 0, y: 0 },
+      { x: 0, y: 0 },
+    ])!;
+    expect(center.meanRing).toBeCloseTo(10, 9);
+    // 距中心 20mm → ceil(20/14)=2 环 → 9 分
+    const ring9 = dispersionGeometry([
+      { x: 20, y: 0 },
+      { x: -20, y: 0 },
+      { x: 0, y: 20 },
+      { x: 0, y: -20 },
+    ])!;
+    expect(ring9.meanRing).toBeCloseTo(9, 9);
+    // 距中心 140mm → ceil(140/14)=10 环 → 出 9 环记 0 分
+    const zero = dispersionGeometry([
+      { x: 140, y: 0 },
+      { x: -140, y: 0 },
+    ])!;
+    expect(zero.meanRing).toBeCloseTo(0, 9);
+  });
 });
 
 describe("correlate", () => {
@@ -244,7 +268,7 @@ describe("groupSummary", () => {
     expect(row.cv).not.toBeNull();
     expect(row.outlierCount).toBeGreaterThanOrEqual(1); // 14.4 是离群
     expect(row.intervalMedian).toBeCloseTo(1.5, 6);
-    expect(row.pass1).not.toBeNull();
+    expect(row.pass).not.toBeNull();
     expect(row.r50).toBeNull(); // 没有散布数据
   });
 
