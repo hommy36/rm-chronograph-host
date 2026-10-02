@@ -27,6 +27,11 @@
   },
   "bundle": {
     "active": true,
+    "publisher": "XianYu_in_oven",
+    "shortDescription": "RoboMaster 摩擦轮测速模块上位机",
+    "longDescription": "弹速采集与分组统计、摩擦轮掉速分析（VOFA+ JustFloat）、靶纸散布分析与多组对比、数据持久化与报告导出。",
+    "license": "MIT",
+    "homepage": "https://github.com/hommy36/rm-chronograph-host",
     "targets": "all",
     "icon": [
       "icons/32x32.png",
