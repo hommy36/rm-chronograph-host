@@ -263,10 +263,10 @@ export default function ShotWaveModal(props: {
           这一发没有波形快照（发射时波形口未连接或数据不足）
         </div>
       ) : (
-        <Space direction="vertical" style={{ width: "100%" }} size="middle">
-          <ReactECharts option={option} style={{ height: 380 }} notMerge />
+        <Space direction="vertical" style={{ width: "100%" }} size="small">
+          <ReactECharts option={option} style={{ height: 300 }} notMerge />
           {groupSpreads.length > 0 && (
-            <Space wrap size="middle">
+            <Space wrap size="small">
               {groupSpreads.map((g) => (
                 <Tag key={g.name} color={g.color} style={{ fontSize: 13, padding: "2px 10px" }}>
                   {g.name} 组内最大轮间差：{g.n >= 2 ? g.spread.toFixed(1) : "—（单轮）"}
@@ -275,7 +275,7 @@ export default function ShotWaveModal(props: {
             </Space>
           )}
           {hideFlat && rows.some((r) => r.flat) && (
-            <div style={{ fontSize: 12, color: "#999", padding: "0 0 4px 2px" }}>
+            <div style={{ fontSize: 12, color: "#999", padding: "0 0 2px 2px", lineHeight: 1.4 }}>
               已隐藏 {rows.filter((r) => r.flat).length} 个平直通道（全程无变化，
               掉速量恒为 0）；关掉「隐藏平直通道」可查看
             </div>
