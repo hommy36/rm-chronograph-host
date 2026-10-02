@@ -265,7 +265,7 @@ export default function ChartsGrid() {
 
   if (!group || speeds.length === 0) {
     return (
-      <Card style={{ height: "100%" }}>
+      <Card style={{ height: "100%", minWidth: 0 }}>
         <Empty
           description="暂无数据：连接设备或打开「模拟数据」，收到测速帧后自动绘图"
           style={{ marginTop: 80 }}
@@ -276,6 +276,11 @@ export default function ChartsGrid() {
 
   const chartCardStyle = {
     height: "100%",
+    // ECharts 会给内部容器写死像素宽度，grid/flex 项的 min-width 默认是 auto，
+    // 不置 0 的话窗口缩小后卡片无法收缩，会把整块内容撑宽、元素跟着错位
+    minWidth: 0,
+    minHeight: 0,
+    overflow: "hidden",
     display: "flex",
     flexDirection: "column",
   } as const;
@@ -286,7 +291,7 @@ export default function ChartsGrid() {
       key={key}
       size="small"
       style={chartCardStyle}
-      styles={{ body: { flex: 1, minHeight: 0 } }}
+      styles={{ body: { flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" } }}
     >
       <ReactECharts option={option} style={chartStyle} />
     </Card>

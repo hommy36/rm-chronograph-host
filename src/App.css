@@ -26,6 +26,7 @@ body {
   gap: 12px;
   flex: 1;
   min-height: 0;
+  min-width: 0;
 }
 
 /* 图表区容器：明细覆盖层的定位基准；纵向撑满剩余空间 */
@@ -33,6 +34,8 @@ body {
   position: relative;
   flex: 1;
   min-height: 420px;
+  /* 允许收窄：里面的图表卡片带着 ECharts 写死的像素宽，不置 0 会把内容撑宽 */
+  min-width: 0;
 }
 
 /* 弹速明细覆盖层：直接盖住下方所有图表，图表保持挂载、数据不丢 */
