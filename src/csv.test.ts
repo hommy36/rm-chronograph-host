@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildAllGroupsCsv, buildGroupCsv } from "./csv";
+import { buildAllGroupsCsv, buildGroupCsv, buildOverviewCsv } from "./csv";
+import { groupSummary } from "./analysis";
 import type { Group, WaveConfig } from "./types";
 import { EMPTY_PARAMS } from "./types";
 import type { WaveSnapshot } from "./wave";
@@ -45,7 +46,7 @@ function makeGroup(withWave: boolean): Group {
 describe("csv 摩擦轮数据导出", () => {
   it("明细 CSV 带配置时追加掉速指标列", () => {
     const csv = buildGroupCsv(makeGroup(true), CFG);
-    const lines = csv.split("\r\n");
+    const lines = csv.split(String.fromCharCode(13, 10));
     const header = lines.find((l) => l.startsWith("序号"))!;
     expect(header).toContain("一1基线");
     expect(header).toContain("一1掉速%");
@@ -63,13 +64,13 @@ describe("csv 摩擦轮数据导出", () => {
 
   it("不传配置时明细列保持原样", () => {
     const csv = buildGroupCsv(makeGroup(true));
-    const header = csv.split("\r\n").find((l) => l.startsWith("序号"))!;
+    const header = csv.split(String.fromCharCode(13, 10)).find((l) => l.startsWith("序号"))!;
     expect(header).toBe("序号,弹速(m/s),dt(us),接收时间");
   });
 
   it("汇总 CSV 带配置时追加轮组均值列", () => {
     const csv = buildAllGroupsCsv([makeGroup(true)], CFG);
-    const [header, row] = csv.split("\r\n");
+    const [header, row] = csv.split(String.fromCharCode(13, 10));
     expect(header).toContain("一级平均掉速%");
     expect(header).toContain("一级平均轮间差");
     const cells = row.split(",");
@@ -84,8 +85,57 @@ describe("csv 摩擦轮数据导出", () => {
     const g = makeGroup(false);
     const csv = buildGroupCsv(g, CFG);
     // 没有任何快照: 不加列
-    expect(csv.split("\r\n").find((l) => l.startsWith("序号"))).toBe(
+    expect(csv.split(String.fromCharCode(13, 10)).find((l) => l.startsWith("序号"))).toBe(
       "序号,弹速(m/s),dt(us),接收时间"
     );
+  });
+});
+
+describe("buildOverviewCsv（测试总览导出）", () => {
+  const mk = (id: number, name: string, speeds: number[]) => {
+    const t0 = 1_700_000_000_000;
+    return {
+      id,
+      name,
+      params: { ...EMPTY_PARAMS, stage1_rpm: "5200", hardness: "50a" },
+      startedAt: t0,
+      shots: speeds.map((v, i) => ({
+        idx: i + 1,
+        speed_mps: v,
+        dt_us: 3200,
+        at_ms: t0 + i * 1500,
+      })),
+    } as Group;
+  };
+
+  it("表头齐全、目标弹速写入首行、数值与表格一致", () => {
+    const rows = [
+      groupSummary(mk(1, "组A", [15.5, 15.6, 15.55, 15.58]), CFG, null, {
+        target: 15.75,
+      }),
+      groupSummary(mk(2, "组B", [15.7, 15.8, 15.75, 15.78]), CFG, null, {
+        target: 15.75,
+      }),
+    ];
+    const csv = buildOverviewCsv(rows, 15.75, 1);
+    expect(csv.startsWith("﻿")).toBe(true);
+    const lines = csv.split(String.fromCharCode(13, 10));
+    expect(lines[0]).toContain("目标弹速,15.750");
+    expect(lines[1]).toContain("组名,一级转速");
+    expect(lines[1]).toContain("达标率(±1%)");
+    expect(lines[1]).toContain("散布半径R50(mm)");
+    const rowA = lines[2].split(",");
+    expect(rowA[0]).toBe("组A");
+    expect(rowA[6]).toBe("4"); // 发数
+    expect(rowA[7]).toBe("15.5575"); // 均值
+    // 目标 15.75 ±1% → 组A 只有 15.6 达标（1/4）
+    expect(rowA[13]).toBe("25.0%");
+  });
+
+  it("未指定目标时标注为各组均值", () => {
+    const rows = [groupSummary(mk(1, "组A", [15.5]), CFG, null)];
+    const csv = buildOverviewCsv(rows, null, 2);
+    expect(csv.split(String.fromCharCode(13, 10))[0]).toContain("目标弹速,各组均值");
+    expect(csv.split(String.fromCharCode(13, 10))[1]).toContain("达标率(±2%)");
   });
 });

@@ -1,20 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { Group } from "./types";
 import {
-  alignedProfile,
   bootstrapDiff,
   correlate,
   crossGroupSeries,
   crossGroupStats,
-  driftTrend,
-  oneSampleT,
   dispersionGeometry,
   groupSummary,
   hotGunDelta,
   intervalStats,
-  lowRuns,
   outliers,
-  parseParam,
   passRate,
   tCritical95,
   tTwoTailedP,
@@ -23,21 +18,7 @@ import {
 } from "./analysis";
 import { EMPTY_PARAMS } from "./types";
 
-describe("parseParam", () => {
-  it("取第一个数字", () => {
-    expect(parseParam("5200")).toBe(5200);
-    expect(parseParam("50a")).toBe(50);
-    expect(parseParam("34.7")).toBeCloseTo(34.7, 6);
-    expect(parseParam("0.0002, 0.0, 0.0000003")).toBeCloseTo(0.0002, 9);
-  });
-  it("没数字返回 null", () => {
-    expect(parseParam("")).toBeNull();
-    expect(parseParam(undefined)).toBeNull();
-    expect(parseParam("无")).toBeNull();
-  });
-});
-
-describe("outliers / lowRuns", () => {
+describe("outliers", () => {
   const base = [15.0, 15.1, 15.05, 15.02, 15.08, 15.03, 15.06, 15.01];
   it("识别明显离群发", () => {
     const v = [...base, 14.0];
@@ -48,13 +29,6 @@ describe("outliers / lowRuns", () => {
   });
   it("无离群时为空", () => {
     expect(outliers([15.0, 15.01, 14.99, 15.0])).toEqual([]);
-  });
-  it("识别连续偏低段", () => {
-    const v = [15.5, 15.5, 15.5, 13.2, 13.2, 15.5, 15.5, 15.5];
-    const runs = lowRuns(v, 1.2, 2);
-    expect(runs).toHaveLength(1);
-    expect(runs[0].from).toBe(4);
-    expect(runs[0].to).toBe(5);
   });
 });
 
@@ -232,50 +206,6 @@ describe("跨多组（当日）分析", () => {
     expect(stats[0].restMean).toBeCloseTo(15.6, 9);
     expect(stats[0].coldDelta).toBeCloseTo(0.1, 9);
     expect(stats[0].n).toBe(7);
-  });
-
-  it("冷枪效应是否显著：三个组都偏快时 p 很小", () => {
-    const stats = crossGroupStats([mk(1, 1000), mk(2, 2000), mk(3, 3000)], 3);
-    const t = oneSampleT(stats.map((s) => s.coldDelta))!;
-    expect(t.mean).toBeCloseTo(0.1, 9);
-    expect(t.n).toBe(3);
-    expect(t.p).toBeLessThan(0.05);
-    expect(t.ciLow).toBeGreaterThan(0);
-  });
-
-  it("无系统性偏差时 p 接近 1", () => {
-    const stats = crossGroupStats(
-      [mk(1, 1000, 0), mk(2, 2000, 0), mk(3, 3000, 0)],
-      3
-    );
-    const t = oneSampleT(stats.map((s) => s.coldDelta))!;
-    expect(Math.abs(t.mean)).toBeLessThan(1e-12);
-    expect(t.p).toBeCloseTo(1, 6);
-  });
-
-  it("对齐曲线能看出头几发的系统偏差", () => {
-    const prof = alignedProfile([mk(1, 1000), mk(2, 2000), mk(3, 3000)], 5);
-    expect(prof).toHaveLength(5);
-    expect(prof[0].shotIdx).toBe(1);
-    expect(prof[0].n).toBe(3);
-    // 每组前 3 发都偏快 0.1 → 第 1 发的平均偏差为正
-    expect(prof[0].meanDev).toBeGreaterThan(0);
-    // 第 4 发起回到各组均值附近
-    expect(Math.abs(prof[3].meanDev)).toBeLessThan(0.05);
-  });
-
-  it("组序漂移趋势：逐组变快可测出正斜率", () => {
-    const g1 = mk(1, 1000, 0);
-    const g2 = mk(2, 2000, 0);
-    const g3 = mk(3, 3000, 0);
-    const bump = (g: Group, d: number) => ({
-      ...g,
-      shots: g.shots.map((s) => ({ ...s, speed_mps: s.speed_mps + d })),
-    });
-    const stats = crossGroupStats([bump(g1, 0), bump(g2, 0.05), bump(g3, 0.1)], 3);
-    const d = driftTrend(stats)!;
-    expect(d.slope).toBeCloseTo(0.05, 6);
-    expect(d.r).toBeCloseTo(1, 6);
   });
 
   it("跨组时间轴按组拼接且编号连续", () => {

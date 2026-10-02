@@ -6,15 +6,6 @@ import { computeStats } from "./stats";
 import { reportShotWave } from "./wave";
 import type { Group, GroupParams, WaveConfig } from "./types";
 
-/** 组参数里取第一个数字： "5200"→5200, "50a"→50, "0.0002, 0.0, 0.0000003"→0.0002, 空→null */
-export function parseParam(s: string | undefined | null): number | null {
-  if (!s) return null;
-  const m = String(s).match(/-?\d+(?:\.\d+)?/);
-  if (!m) return null;
-  const v = Number(m[0]);
-  return Number.isFinite(v) ? v : null;
-}
-
 /** 离群发：|x-mean| ≥ k·σ（σ 为样本标准差） */
 export function outliers(
   values: number[],
@@ -28,39 +19,6 @@ export function outliers(
     if (Math.abs(z) >= k) out.push({ idx: i + 1, value: v, z });
   });
   return out;
-}
-
-/** 连续偏低段：连续 ≥minLen 发低于 mean - k·σ（疑似供弹/摩擦轮异常） */
-export function lowRuns(
-  values: number[],
-  k = 1.2,
-  minLen = 2
-): { from: number; to: number; mean: number }[] {
-  const s = computeStats(values);
-  if (!s) return [];
-  const th = s.mean - k * s.std;
-  const runs: { from: number; to: number; mean: number }[] = [];
-  let start = -1;
-  const flush = (endIdx: number) => {
-    if (start >= 0 && endIdx - start + 1 >= minLen) {
-      const seg = values.slice(start, endIdx + 1);
-      runs.push({
-        from: start + 1,
-        to: endIdx + 1,
-        mean: seg.reduce((a, b) => a + b, 0) / seg.length,
-      });
-    }
-    start = -1;
-  };
-  values.forEach((v, i) => {
-    if (v < th) {
-      if (start < 0) start = i;
-    } else {
-      flush(i - 1);
-    }
-  });
-  flush(values.length - 1);
-  return runs;
 }
 
 /** 逐发趋势斜率（最小二乘，单位：m/s 每发）；点数 <3 返回 null */
@@ -533,74 +491,6 @@ export function crossGroupStats(groups: Group[], k = 3): CrossGroupStats[] {
         startedAt: g.startedAt,
       };
     });
-}
-
-export interface OneSampleTest {
-  mean: number;
-  ciLow: number;
-  ciHigh: number;
-  p: number;
-  n: number;
-}
-
-/** 单样本 t 检验（用于"各组差值是否系统性偏离 0"，即热枪/冷枪效应是否真实存在） */
-export function oneSampleT(values: number[]): OneSampleTest | null {
-  const n = values.length;
-  if (n < 2) return null;
-  const mean = values.reduce((a, b) => a + b, 0) / n;
-  const sd = Math.sqrt(
-    values.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1)
-  );
-  const se = sd / Math.sqrt(n);
-  if (se === 0) return { mean, ciLow: mean, ciHigh: mean, p: mean === 0 ? 1 : 0, n };
-  const t = mean / se;
-  const crit = tCritical95(n - 1);
-  return {
-    mean,
-    ciLow: mean - crit * se,
-    ciHigh: mean + crit * se,
-    p: tTwoTailedP(t, n - 1),
-    n,
-  };
-}
-
-/**
- * 按"组内第几发"对齐的平均偏离曲线：以各组自身均值为基准，
- * 把每组的第 1、2、3… 发偏差叠加起来，用于看开机后头几发的系统性偏差。
- */
-export function alignedProfile(
-  groups: Group[],
-  maxShots = 10
-): { shotIdx: number; meanDev: number; n: number; sd: number }[] {
-  const buckets: number[][] = Array.from({ length: maxShots }, () => []);
-  for (const g of groups) {
-    const v = g.shots.map((s) => s.speed_mps);
-    if (v.length === 0) continue;
-    const mean = v.reduce((a, b) => a + b, 0) / v.length;
-    v.slice(0, maxShots).forEach((x, i) => buckets[i].push(x - mean));
-  }
-  const out: { shotIdx: number; meanDev: number; n: number; sd: number }[] = [];
-  buckets.forEach((arr, i) => {
-    if (arr.length === 0) return;
-    const m = arr.reduce((a, b) => a + b, 0) / arr.length;
-    const sd =
-      arr.length > 1
-        ? Math.sqrt(arr.reduce((a, b) => a + (b - m) ** 2, 0) / (arr.length - 1))
-        : 0;
-    out.push({ shotIdx: i + 1, meanDev: m, n: arr.length, sd });
-  });
-  return out;
-}
-
-/** 组序 → 组均值的漂移趋势（正=越打到后面越慢/越快由符号决定） */
-export function driftTrend(
-  stats: CrossGroupStats[]
-): { slope: number; r: number; n: number } | null {
-  if (stats.length < 3) return null;
-  const xs = stats.map((_, i) => i + 1);
-  const ys = stats.map((s) => s.mean);
-  const c = correlate(xs, ys);
-  return c ? { slope: c.slope, r: c.r, n: c.n } : null;
 }
 
 /** 全部组的发按时间顺序拼成一条序列（跨组时间轴） */

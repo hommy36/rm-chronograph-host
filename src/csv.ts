@@ -4,6 +4,11 @@ import type { Group, WaveConfig } from "./types";
 import { effectiveWaveConfig, EMPTY_WAVE_CONFIG } from "./types";
 import { computeStats } from "./stats";
 import { reportShotWave } from "./wave";
+import type { GroupSummaryRow } from "./analysis";
+
+/** 数字格式化（总览 CSV 用） */
+const num = (v: number | null | undefined, d = 3) =>
+  v === null || v === undefined || !Number.isFinite(v) ? "-" : v.toFixed(d);
 
 const BOM = "﻿";
 
@@ -199,4 +204,72 @@ export async function saveCsv(
   contents: string
 ): Promise<boolean> {
   return saveText(defaultName, contents, "CSV", "csv", "text/csv;charset=utf-8");
+}
+
+/** 逐组总览 CSV（与界面表格同列） */
+export function buildOverviewCsv(
+  rows: GroupSummaryRow[],
+  target: number | null,
+  tolPct: number
+): string {
+  const cell = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
+  const head = [
+    "组名",
+    "一级转速",
+    "二级转速",
+    "PID",
+    "压缩量(mm)",
+    "摩擦轮硬度",
+    "发数",
+    "均值(m/s)",
+    "最大值",
+    "最小值",
+    "极差",
+    "标准差",
+    "变异系数%",
+    `达标率(±${tolPct}%)`,
+    "离群发数",
+    "趋势(m/s/发)",
+    "热枪效应(m/s)",
+    "发间隔中位(s)",
+    "发间隔最长(s)",
+    "平均掉速%",
+    "散布半径R50(mm)",
+    "平均环数",
+  ];
+  const lines = [
+    `# 目标弹速,${target === null ? "各组均值" : target.toFixed(3)}`,
+    head.join(","),
+  ];
+  for (const r of rows) {
+    const pass =
+      tolPct === 0.5 ? r.pass05 : tolPct === 2 ? r.pass2 : r.pass1;
+    lines.push(
+      [
+        cell(r.name),
+        cell(r.params.stage1_rpm),
+        cell(r.params.stage2_rpm),
+        cell(r.params.pid),
+        cell(r.params.compression),
+        cell(r.params.hardness),
+        String(r.n),
+        num(r.mean, 4),
+        num(r.max, 3),
+        num(r.min, 3),
+        num(r.range, 3),
+        num(r.std, 4),
+        num(r.cv, 2),
+        pass === null ? "-" : `${(pass * 100).toFixed(1)}%`,
+        String(r.outlierCount),
+        num(r.trend, 4),
+        num(r.hotGun, 4),
+        num(r.intervalMedian, 2),
+        num(r.intervalMax, 2),
+        num(r.wheelDropPct, 2),
+        num(r.r50, 2),
+        num(r.meanRing, 2),
+      ].join(",")
+    );
+  }
+  return "\ufeff" + lines.join("\r\n") + "\r\n";
 }
