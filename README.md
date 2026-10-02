@@ -62,12 +62,29 @@ Tauri v2 + React + TypeScript + Ant Design + ECharts，Windows 原生安装包�
 
 ## 安装
 
-到 [Releases](../../releases) 下载：
+到 [Releases](../../releases) 下载对应平台的安装包。
 
+**Windows 10/11 x64**
 - `rm-chronograph-host_x.x.x_x64-setup.exe`（NSIS 安装包，推荐）
 - `rm-chronograph-host_x.x.x_x64_en-US.msi`（MSI）
 
-Windows 10/11 x64。首次运行若被 SmartScreen 拦截，选"更多信息 → 仍要运行"。
+首次运行若被 SmartScreen 拦截，选"更多信息 → 仍要运行"。
+
+**Ubuntu / Debian（22.04 及以上）**
+```bash
+# deb 安装包
+sudo apt install ./rm-chronograph-host_x.x.x_amd64.deb
+# 或免安装 AppImage
+chmod +x rm-chronograph-host_x.x.x_amd64.AppImage && ./rm-chronograph-host_x.x.x_amd64.AppImage
+```
+
+Linux 上普通用户默认没有串口权限，需要把自己加入 `dialout` 组（加完**注销重新登录**生效），否则连不上测速模块：
+
+```bash
+sudo usermod -aG dialout $USER
+```
+
+依赖：`libwebkit2gtk-4.1-0`、`libgtk-3-0`（apt 装 deb 时会自动带上）。AppImage 自带依赖，但同样需要 `dialout` 权限。
 
 ## 快速上手
 
