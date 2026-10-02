@@ -45,14 +45,17 @@ describe("分组管理", () => {
     expect(st.viewingGroupId).toBeNull();
   });
 
-  it("toggleCompare 最多保留两个", () => {
+  it("toggleCompare 可勾选多组，再点取消勾选", () => {
     const s = useAppStore.getState();
     s.startGroup({ ...EMPTY_PARAMS });
     s.startGroup({ ...EMPTY_PARAMS });
     s.startGroup({ ...EMPTY_PARAMS });
     const ids = useAppStore.getState().groups.map((g) => g.id);
     ids.forEach((id) => useAppStore.getState().toggleCompare(id));
-    expect(useAppStore.getState().compareIds).toEqual(ids.slice(-2));
+    // 不再限制两组，勾选顺序即列顺序
+    expect(useAppStore.getState().compareIds).toEqual(ids);
+    useAppStore.getState().toggleCompare(ids[1]);
+    expect(useAppStore.getState().compareIds).toEqual([ids[0], ids[2]]);
   });
 
   it("组内波形通道分配可写入并随组保留", () => {

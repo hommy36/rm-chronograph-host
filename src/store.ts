@@ -118,7 +118,7 @@ interface AppState {
   /** 喂入波形口原始字节（真实串口事件 / 模拟器共用） */
   onWaveBytes: (atMs: number, bytes: ArrayLike<number>) => void;
   setWaveConfig: (cfg: WaveConfig) => void;
-  /** 勾选/取消勾选对比组（最多 2 个，超出时挤掉最早的） */
+  /** 勾选/取消勾选对比组（可多选，勾选顺序即对比表列顺序） */
   toggleCompare: (groupId: number) => void;
   clearCompare: () => void;
   /** 从持久化数据恢复（启动载入 / 导入为测试） */
@@ -513,8 +513,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (s.compareIds.includes(groupId)) {
         return { compareIds: s.compareIds.filter((id) => id !== groupId) };
       }
-      const next = [...s.compareIds, groupId];
-      return { compareIds: next.slice(-2) };
+      return { compareIds: [...s.compareIds, groupId] };
     }),
 
   clearCompare: () => set({ compareIds: [] }),

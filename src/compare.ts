@@ -1,8 +1,14 @@
-/** 两组测试对比: 统计指标并排、共享分箱直方图、摩擦轮指标并排（纯计算, 可测） */
+/** 多组测试对比: 统计指标并排、共享分箱直方图、摩擦轮指标并排（纯计算, 可测） */
 import type { Group, WaveConfig, WheelGroupCfg } from "./types";
 import { computeStats } from "./stats";
 import { reportShotWave } from "./wave";
-import { bootstrapDiff, welchTTest } from "./analysis";
+import {
+  bootstrapDiff,
+  pairwiseWelch,
+  permutationTest,
+  welchAnova,
+  welchTTest,
+} from "./analysis";
 import {
   ARMOR,
   avgDistance,
@@ -13,6 +19,103 @@ import {
 } from "./dispersion/math";
 
 export const COMPARE_BINS = 15;
+
+/** 多组配色（与轮组色区分开） */
+export const COMPARE_COLORS = [
+  "#1677ff",
+  "#fa541c",
+  "#52c41a",
+  "#722ed1",
+  "#13c2c2",
+  "#eb2f96",
+  "#faad14",
+  "#2f54eb",
+  "#a0d911",
+  "#8c8c8c",
+];
+
+export function compareColor(i: number): string {
+  return COMPARE_COLORS[i % COMPARE_COLORS.length];
+}
+
+/** 多组统计指标表: 一行一个指标, values 与传入的组一一对应 */
+export interface StatsRow {
+  label: string;
+  digits: number;
+  values: (number | null)[];
+}
+
+export function statsRowsOf(groups: Group[]): StatsRow[] {
+  const stats = groups.map((g) => computeStats(g.shots.map((s) => s.speed_mps)));
+  const row = (
+    label: string,
+    digits: number,
+    pick: (s: NonNullable<ReturnType<typeof computeStats>>) => number,
+    empty: number | null
+  ): StatsRow => ({
+    label,
+    digits,
+    values: stats.map((s) => (s ? pick(s) : empty)),
+  });
+  return [
+    row("样本数", 0, (s) => s.n, 0),
+    row("均值 (m/s)", 4, (s) => s.mean, null),
+    row("最大值 (m/s)", 3, (s) => s.max, null),
+    row("最小值 (m/s)", 3, (s) => s.min, null),
+    row("极差 (m/s)", 3, (s) => s.range, null),
+    row("方差", 6, (s) => s.variance, null),
+    row("标准差", 4, (s) => s.std, null),
+  ];
+}
+
+/** 多组整体差异: 均值用 Welch ANOVA；极差/标准差分布未知，用置换检验 */
+export interface OverallTestRow {
+  label: string;
+  method: string;
+  /** 检验统计量（ANOVA 为 F，置换为组间方差） */
+  stat: number | null;
+  p: number | null;
+}
+
+export function overallTests(groups: Group[]): OverallTestRow[] {
+  const vals = groups.map((g) => g.shots.map((s) => s.speed_mps));
+  if (groups.length < 3) return [];
+  const rangeStat = (v: number[]) => Math.max(...v) - Math.min(...v);
+  const stdStat = (v: number[]) => {
+    const m = v.reduce((p, q) => p + q, 0) / v.length;
+    return Math.sqrt(
+      v.reduce((s, x) => s + (x - m) ** 2, 0) / Math.max(1, v.length - 1)
+    );
+  };
+  const anova = welchAnova(vals);
+  const rangeTest = permutationTest(vals, rangeStat, 1000, 20261002);
+  const stdTest = permutationTest(vals, stdStat, 1000, 20261002);
+  return [
+    {
+      label: "均值",
+      method: anova ? `Welch ANOVA（F(${anova.df1}, ${anova.df2.toFixed(1)})）` : "Welch ANOVA",
+      stat: anova ? anova.f : null,
+      p: anova ? anova.p : null,
+    },
+    {
+      label: "极差",
+      method: "置换检验（1000 次）",
+      stat: rangeTest ? rangeTest.observed : null,
+      p: rangeTest ? rangeTest.p : null,
+    },
+    {
+      label: "标准差",
+      method: "置换检验（1000 次）",
+      stat: stdTest ? stdTest.observed : null,
+      p: stdTest ? stdTest.p : null,
+    },
+  ];
+}
+
+/** 均值两两 Welch t 检验的 p 值矩阵（i<j 才有值） */
+export function pairwiseMeanP(groups: Group[]): (number | null)[][] {
+  return pairwiseWelch(groups.map((g) => g.shots.map((s) => s.speed_mps)));
+}
 
 export interface CompareStatsRow {
   label: string;
@@ -85,22 +188,17 @@ export function compareStatsRows(a: Group, b: Group): CompareStatsRow[] {
   return rows;
 }
 
-/** 两组共用分箱的直方图（对比用） */
-export function pairedHistogram(
-  a: number[],
-  b: number[],
+/** 多组共用分箱的直方图（对比用）；counts 与传入序列一一对应 */
+export function groupedHistogram(
+  series: number[][],
   binCount = COMPARE_BINS
-): { centers: number[]; a: number[]; b: number[] } {
-  const all = [...a, ...b];
-  if (all.length === 0) return { centers: [], a: [], b: [] };
+): { centers: number[]; counts: number[][] } {
+  const all = series.flat();
+  if (all.length === 0) return { centers: [], counts: series.map(() => []) };
   const min = Math.min(...all);
   const max = Math.max(...all);
   if (max === min) {
-    return {
-      centers: [min],
-      a: [a.length],
-      b: [b.length],
-    };
+    return { centers: [min], counts: series.map((v) => [v.length]) };
   }
   const binWidth = (max - min) / binCount;
   const fill = (values: number[]) => {
@@ -114,58 +212,52 @@ export function pairedHistogram(
     return counts;
   };
   const centers = Array.from({ length: binCount }, (_, i) => min + (i + 0.5) * binWidth);
-  return { centers, a: fill(a), b: fill(b) };
+  return { centers, counts: series.map(fill) };
 }
 
 export interface WheelCompareRow {
   name: string;
-  /** 平均掉速 % */
-  aDrop: number | null;
-  bDrop: number | null;
-  /** 平均组内最大轮间差 */
-  aSpread: number | null;
-  bSpread: number | null;
-  /** 参与统计的发数 */
-  aShots: number;
-  bShots: number;
+  /** 各组的平均掉速%（与传入的组一一对应；该组没有这个轮组时为 null） */
+  drops: (number | null)[];
+  /** 各组该轮组的平均轮间差 */
+  spreads: (number | null)[];
+  /** 各组参与统计的发数 */
+  shots: number[];
 }
 
 /**
  * 摩擦轮指标并排: 各轮组的平均掉速% 与平均轮间差。
- * 两组可以各有自己的轮组分配（cfgA/cfgB），轮组按名字对齐。
+ * 每组可以有自己的轮组分配（cfgs 与 groups 一一对应），轮组按名字对齐。
  */
 export function compareWheelRows(
-  a: Group,
-  b: Group,
-  cfgA: WaveConfig,
-  cfgB: WaveConfig = cfgA
+  groups: Group[],
+  cfgs: WaveConfig[]
 ): WheelCompareRow[] {
+  const cfgOf = (i: number) => cfgs[i] ?? cfgs[0];
   const repsOf = (g: Group, cfg: WaveConfig) => {
     const reps = g.shots.filter((s) => s.wave).map((s) => reportShotWave(s.wave!, cfg));
     return { reps, n: reps.length };
   };
   const names: string[] = [];
-  for (const n of [
-    ...cfgA.groups.map((g) => g.name),
-    ...cfgB.groups.map((g) => g.name),
-  ]) {
-    if (!names.includes(n)) names.push(n);
+  for (const cfg of cfgs) {
+    for (const wg of cfg.groups) {
+      if (!names.includes(wg.name)) names.push(wg.name);
+    }
   }
   const mean = (arr: number[]) =>
     arr.length > 0 ? arr.reduce((x, y) => x + y, 0) / arr.length : null;
-  const A = repsOf(a, cfgA);
-  const B = repsOf(b, cfgB);
+  const data = groups.map((g, i) => repsOf(g, cfgOf(i)));
   const side = (
-    g: WheelGroupCfg | undefined,
+    wg: WheelGroupCfg | undefined,
     cfg: WaveConfig,
-    data: { reps: ReturnType<typeof reportShotWave>[]; n: number }
+    d: { reps: ReturnType<typeof reportShotWave>[]; n: number }
   ) => {
-    if (!g) return { drop: null, spread: null };
-    const idx = cfg.groups.indexOf(g);
+    if (!wg) return { drop: null, spread: null };
+    const idx = cfg.groups.indexOf(wg);
     const drops: number[] = [];
     const spreads: number[] = [];
-    for (const rep of data.reps) {
-      for (const ch of g.channels) {
+    for (const rep of d.reps) {
+      for (const ch of wg.channels) {
         const m = rep.channelMetrics[ch];
         if (m) drops.push(m.dropPct);
       }
@@ -175,18 +267,15 @@ export function compareWheelRows(
     return { drop: mean(drops), spread: mean(spreads) };
   };
   return names.map((name) => {
-    const ga = cfgA.groups.find((g) => g.name === name);
-    const gb = cfgB.groups.find((g) => g.name === name);
-    const ca = side(ga, cfgA, A);
-    const cb = side(gb, cfgB, B);
+    const sides = groups.map((_, i) => {
+      const cfg = cfgOf(i);
+      return side(cfg.groups.find((x) => x.name === name), cfg, data[i]);
+    });
     return {
       name,
-      aDrop: ca.drop,
-      bDrop: cb.drop,
-      aSpread: ca.spread,
-      bSpread: cb.spread,
-      aShots: A.n,
-      bShots: B.n,
+      drops: sides.map((s) => s.drop),
+      spreads: sides.map((s) => s.spread),
+      shots: data.map((d) => d.n),
     };
   });
 }
@@ -285,10 +374,6 @@ export function groupDispersion(g: Group): DispersionSide {
   };
 }
 
-export function compareDispersion(a: Group, b: Group): [DispersionSide, DispersionSide] {
-  return [groupDispersion(a), groupDispersion(b)];
-}
-
 /** 把落点整体平移，使其弹着中心（点群重心）落在原点——用于重合两组散布做形状对比 */
 export function recenterToMean(points: { x: number; y: number }[]): {
   x: number;
@@ -299,70 +384,95 @@ export function recenterToMean(points: { x: number; y: number }[]): {
   return points.map((p) => ({ x: p.x - c.x, y: p.y - c.y }));
 }
 
-/** 对比结果导出 CSV */export function buildCompareCsv(
-  a: Group,
-  b: Group,
-  cfgA: WaveConfig,
-  cfgB: WaveConfig = cfgA
-): string {
+/** 对比结果导出 CSV（任意组数；cfgs 与 groups 一一对应） */
+export function buildCompareCsv(groups: Group[], cfgs: WaveConfig[]): string {
   const cell = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
-  const fmt = (v: number | null, digits: number) =>
-    v === null || !isFinite(v) ? "" : v.toFixed(digits);
+  const fmt = (v: number | null | undefined, digits: number) =>
+    v === null || v === undefined || !isFinite(v) ? "" : v.toFixed(digits);
+  const names = groups.map((g) => g.name);
+  const paramsOf = (g: Group) =>
+    `${g.params.stage1_rpm} / ${g.params.stage2_rpm} / 压缩量 ${g.params.compression} / 硬度 ${g.params.hardness}`;
   const lines: string[] = [
-    `# 对比,${cell(a.name)} vs ${cell(b.name)}`,
-    `# A 组参数,${cell(`${a.params.stage1_rpm} / ${a.params.stage2_rpm} / 压缩量 ${a.params.compression} / 硬度 ${a.params.hardness}`)}`,
-    `# B 组参数,${cell(`${b.params.stage1_rpm} / ${b.params.stage2_rpm} / 压缩量 ${b.params.compression} / 硬度 ${b.params.hardness}`)}`,
-    `指标,A(${cell(a.name)}),B(${cell(b.name)}),差值(B-A)`,
+    `# 对比,${names.map(cell).join(" vs ")}`,
+    ...groups.map((g, i) => `# 组${i + 1} 参数 (${cell(g.name)}),${cell(paramsOf(g))}`),
+    ["指标", ...names.map(cell)].join(","),
   ];
-  for (const r of compareStatsRows(a, b)) {
-    lines.push([cell(r.label), fmt(r.a, r.digits), fmt(r.b, r.digits), fmt(r.diff, r.digits)].join(","));
+  for (const r of statsRowsOf(groups)) {
+    lines.push([cell(r.label), ...r.values.map((v) => fmt(v, r.digits))].join(","));
   }
-  const wheels = compareWheelRows(a, b, cfgA, cfgB);
-  if (wheels.length > 0) {
+  // 两组：逐指标差值与检验；三组及以上：整体检验 + 两两均值检验
+  if (groups.length === 2) {
     lines.push("");
-    lines.push("轮组,指标,A,B,差值(B-A)");
-    for (const w of wheels) {
-      const dDrop =
-        w.aDrop !== null && w.bDrop !== null ? w.bDrop - w.aDrop : null;
-      const dSpread =
-        w.aSpread !== null && w.bSpread !== null ? w.bSpread - w.aSpread : null;
+    lines.push(`指标,差值(B-A),95%CI 下限,95%CI 上限,检验方法,p 值`);
+    for (const r of compareStatsRows(groups[0], groups[1])) {
       lines.push(
-        [cell(w.name), "平均掉速%", fmt(w.aDrop, 2), fmt(w.bDrop, 2), fmt(dDrop, 2)].join(",")
-      );
-      lines.push(
-        [cell(w.name), "平均轮间差", fmt(w.aSpread, 1), fmt(w.bSpread, 1), fmt(dSpread, 1)].join(",")
+        [
+          cell(r.label),
+          fmt(r.diff, r.digits),
+          fmt(r.ciLow, r.digits),
+          fmt(r.ciHigh, r.digits),
+          r.method ?? "",
+          fmt(r.p, 4),
+        ].join(",")
       );
     }
-  }
-  const hist = pairedHistogram(
-    a.shots.map((s) => s.speed_mps),
-    b.shots.map((s) => s.speed_mps)
-  );
-  if (hist.centers.length > 0) {
+  } else if (groups.length >= 3) {
     lines.push("");
-    lines.push("箱中心(m/s),A 频数,B 频数");
-    hist.centers.forEach((c, i) => {
-      lines.push([c.toFixed(4), String(hist.a[i]), String(hist.b[i])].join(","));
+    lines.push("整体差异检验,方法,统计量,p 值");
+    for (const t of overallTests(groups)) {
+      lines.push([cell(t.label), cell(t.method), fmt(t.stat, 4), fmt(t.p, 4)].join(","));
+    }
+    lines.push("");
+    lines.push("均值两两 Welch t 检验 p 值（未校正多重比较）");
+    const p = pairwiseMeanP(groups);
+    lines.push(["", ...names.map(cell)].join(","));
+    groups.forEach((g, i) => {
+      lines.push(
+        [cell(g.name), ...groups.map((_, j) => (j <= i ? "" : fmt(p[i][j], 4)))].join(",")
+      );
     });
   }
-  const [da, db] = compareDispersion(a, b);
-  if (da.hasData || db.hasData) {
+  const wheels = compareWheelRows(groups, cfgs);
+  if (wheels.length > 0) {
     lines.push("");
-    lines.push(`散布(靶纸),A(${cell(a.name)}),B(${cell(b.name)}),差值(B-A)`);
-    const row = (label: string, x: number | null, y: number | null, digits: number) => {
-      const diff = x !== null && y !== null ? y - x : null;
-      lines.push([cell(label), fmt(x, digits), fmt(y, digits), fmt(diff, digits)].join(","));
-    };
-    row("标点数", da.n, db.n, 0);
-    row("平均环数(以各自点群中心)", da.meanRing, db.meanRing, 3);
-    row("平均散布距离(mm)", da.avgDist, db.avgDist, 2);
-    row("最小包围圆半径(mm)", da.mecRadius, db.mecRadius, 2);
-    row("小装甲命中率(%)", da.hitSmall === null ? null : da.hitSmall * 100, db.hitSmall === null ? null : db.hitSmall * 100, 1);
-    row("大装甲命中率(%)", da.hitLarge === null ? null : da.hitLarge * 100, db.hitLarge === null ? null : db.hitLarge * 100, 1);
-    row("飞镖命中率(%)", da.hitDart === null ? null : da.hitDart * 100, db.hitDart === null ? null : db.hitDart * 100, 1);
-    lines.push("落点(mm, 以纸面中心为原点),X,Y");
-    da.pointsMm.forEach((p) => lines.push([`A(${cell(a.name)})`, p.x.toFixed(2), p.y.toFixed(2)].join(",")));
-    db.pointsMm.forEach((p) => lines.push([`B(${cell(b.name)})`, p.x.toFixed(2), p.y.toFixed(2)].join(",")));
+    lines.push(["轮组", "指标", ...names.map(cell)].join(","));
+    for (const w of wheels) {
+      lines.push([cell(w.name), "平均掉速%", ...w.drops.map((v) => fmt(v, 2))].join(","));
+      lines.push([cell(w.name), "平均轮间差", ...w.spreads.map((v) => fmt(v, 1))].join(","));
+    }
+  }
+  const hist = groupedHistogram(groups.map((g) => g.shots.map((s) => s.speed_mps)));
+  if (hist.centers.length > 0) {
+    lines.push("");
+    lines.push(["箱中心(m/s)", ...names.map((n) => `${cell(n)} 频数`)].join(","));
+    hist.centers.forEach((c, i) => {
+      lines.push([c.toFixed(4), ...hist.counts.map((col) => String(col[i]))].join(","));
+    });
+  }
+  const dis = groups.map(groupDispersion);
+  if (dis.some((d) => d.hasData)) {
+    const noData = (v: number | null | undefined, digits: number) =>
+      v === null || v === undefined ? "" : v.toFixed(digits);
+    const pct = (v: number | null) => (v === null ? null : v * 100);
+    lines.push("");
+    lines.push(["散布(靶纸)", ...names.map(cell)].join(","));
+    lines.push(["标点数", ...dis.map((d) => String(d.n))].join(","));
+    lines.push(
+      ["平均环数(以各自点群中心)", ...dis.map((d) => noData(d.meanRing, 3))].join(",")
+    );
+    lines.push(["平均散布距离(mm)", ...dis.map((d) => noData(d.avgDist, 2))].join(","));
+    lines.push(
+      ["最小包围圆半径(mm)", ...dis.map((d) => noData(d.mecRadius, 2))].join(",")
+    );
+    lines.push(["小装甲命中率(%)", ...dis.map((d) => noData(pct(d.hitSmall), 1))].join(","));
+    lines.push(["大装甲命中率(%)", ...dis.map((d) => noData(pct(d.hitLarge), 1))].join(","));
+    lines.push(["飞镖命中率(%)", ...dis.map((d) => noData(pct(d.hitDart), 1))].join(","));
+    lines.push("落点(mm, 以纸面中心为原点),组,X,Y");
+    dis.forEach((d, i) => {
+      d.pointsMm.forEach((p) =>
+        lines.push([`${cell(names[i])}`, p.x.toFixed(2), p.y.toFixed(2)].join(","))
+      );
+    });
   }
   return "\ufeff" + lines.join("\r\n") + "\r\n";
 }

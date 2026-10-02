@@ -511,10 +511,12 @@ export default function GroupPanel() {
             size="small"
             block
             icon={<FundOutlined />}
-            disabled={compareIds.length !== 2}
+            disabled={compareIds.length < 2}
             onClick={() => setCompareOpen(true)}
           >
-            {compareIds.length === 2 ? "一键对比两组" : "再勾选一组进行对比"}
+            {compareIds.length < 2
+              ? "再勾选一组进行对比"
+              : `一键对比 ${compareIds.length} 组`}
           </Button>
         </div>
       )}

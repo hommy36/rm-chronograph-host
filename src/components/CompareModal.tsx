@@ -13,23 +13,68 @@ import {
   Tooltip,
   message,
 } from "antd";
-import { DownloadOutlined, FundOutlined } from "@ant-design/icons";
+import type { TableColumnsType } from "antd";
+import {
+  DownloadOutlined,
+  FundOutlined,
+  QuestionCircleOutlined,
+} from "@ant-design/icons";
 import { useAppStore } from "../store";
+import type { Group } from "../types";
 import {
   buildCompareCsv,
-  compareDispersion,
+  compareColor,
   compareStatsRows,
   compareWheelRows,
   equalScaleRanges,
-  pairedHistogram,
+  groupDispersion,
+  groupedHistogram,
+  overallTests,
+  pairwiseMeanP,
   recenterToMean,
+  statsRowsOf,
 } from "../compare";
+import type { StatsRow } from "../compare";
 import { saveCsv } from "../csv";
 import { meanPoint } from "../dispersion/math";
 
-/** 两组配色（与轮组色区分开，用红/蓝对比） */
-const COLOR_A = "#1677ff";
-const COLOR_B = "#fa541c";
+interface StatRowView extends StatsRow {
+  diff?: number | null;
+  ciLow?: number | null;
+  ciHigh?: number | null;
+  p?: number | null;
+}
+
+interface DispRowView {
+  label: string;
+  digits: number;
+  suffix: string;
+  values: (number | null)[];
+}
+
+function fmtCell(v: number | null | undefined, digits: number, suffix = "") {
+  if (v === null || v === undefined || !isFinite(v)) return "-";
+  return `${v.toFixed(digits)}${suffix}`;
+}
+
+function fmtP(v: number | null | undefined) {
+  if (v === null || v === undefined || !isFinite(v)) return "-";
+  return v < 0.001 ? "<0.001" : v.toFixed(3);
+}
+
+/** p 值单元格：显著时标红加粗 */
+function pCell(v: number | null | undefined) {
+  return (
+    <span
+      style={{
+        fontWeight: (v ?? 1) < 0.05 ? 700 : 400,
+        color: (v ?? 1) < 0.05 ? "#fa541c" : "#888",
+      }}
+    >
+      {fmtP(v)}
+    </span>
+  );
+}
 
 export default function CompareModal(props: {
   open: boolean;
@@ -40,21 +85,45 @@ export default function CompareModal(props: {
   const globalWaveConfig = useAppStore((s) => s.waveConfig);
   const clearCompare = useAppStore((s) => s.clearCompare);
 
-  const a = groups.find((g) => g.id === compareIds[0]) ?? null;
-  const b = groups.find((g) => g.id === compareIds[1]) ?? null;
+  /** 勾选顺序即列顺序；组被删掉时自动跳过 */
+  const picked = useMemo(
+    () =>
+      compareIds
+        .map((id) => groups.find((g) => g.id === id))
+        .filter((g): g is Group => !!g),
+    [compareIds, groups]
+  );
+  const names = picked.map((g) => g.name);
+  const multi = picked.length >= 3;
+  const tooManyColors = picked.length > 10;
 
-  const statsRows = useMemo(
-    () => (a && b ? compareStatsRows(a, b) : []),
-    [a, b]
+  const statRows = useMemo<StatRowView[]>(() => {
+    const base = statsRowsOf(picked);
+    if (picked.length !== 2) return base;
+    const t = compareStatsRows(picked[0], picked[1]);
+    return base.map((r) => {
+      const m = t.find((x) => x.label === r.label);
+      return {
+        ...r,
+        diff: m?.diff ?? null,
+        ciLow: m?.ciLow ?? null,
+        ciHigh: m?.ciHigh ?? null,
+        p: m?.p ?? null,
+      };
+    });
+  }, [picked]);
+
+  const wheels = useMemo(
+    () =>
+      compareWheelRows(
+        picked,
+        picked.map((g) => g.waveConfig ?? globalWaveConfig)
+      ),
+    [picked, globalWaveConfig]
   );
-  // 两组可以各有自己的轮组分配
-  const cfgA = a?.waveConfig ?? globalWaveConfig;
-  const cfgB = b?.waveConfig ?? globalWaveConfig;
-  const wheelRows = useMemo(
-    () => (a && b ? compareWheelRows(a, b, cfgA, cfgB) : []),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [a, b, cfgA, cfgB]
-  );
+  const overall = useMemo(() => overallTests(picked), [picked]);
+  const pairwise = useMemo(() => pairwiseMeanP(picked), [picked]);
+  const sides = useMemo(() => picked.map(groupDispersion), [picked]);
 
   const [alignCenters, setAlignCenters] = useState(true);
 
@@ -73,20 +142,13 @@ export default function CompareModal(props: {
     return () => ro.disconnect();
   }, [props.open]);
 
-  const [disA, disB] = useMemo(
-    () =>
-      a && b
-        ? compareDispersion(a, b)
-        : ([null, null] as [null, null]),
-    [a, b]
-  );
-
   const dispersionOption = useMemo<EChartsOption>(() => {
-    if (!a || !b || !disA || !disB) return {};
-    // 重合弹着中心：把两组各自平移到点群重心为原点，直接比散布形状
-    const pa = alignCenters ? recenterToMean(disA.pointsMm) : disA.pointsMm;
-    const pb = alignCenters ? recenterToMean(disB.pointsMm) : disB.pointsMm;
-    const all = [...pa, ...pb];
+    if (!sides.some((s) => s.hasData)) return {};
+    // 重合弹着中心：各组平移到点群重心为原点，直接比散布形状
+    const plots = sides.map((s) =>
+      alignCenters ? recenterToMean(s.pointsMm) : s.pointsMm
+    );
+    const all = plots.flat();
     const maxAbs = Math.max(
       30,
       ...all.map((p) => Math.max(Math.abs(p.x), Math.abs(p.y)))
@@ -104,6 +166,7 @@ export default function CompareModal(props: {
       pts: { x: number; y: number }[],
       color: string
     ) => {
+      if (pts.length === 0) return [];
       const center = meanPoint(pts);
       const series: SeriesOption[] = [
         {
@@ -132,7 +195,7 @@ export default function CompareModal(props: {
       animation: true,
       animationDuration: 300,
       grid: { left: PAD_L, right: PAD_R, top: PAD_T, bottom: PAD_B },
-      legend: { top: 4, textStyle: { fontSize: 11 } },
+      legend: { type: "scroll", top: 4, textStyle: { fontSize: 11 } },
       tooltip: {
         formatter: (p: unknown) => {
           const item = p as { seriesName: string; value: [number, number] };
@@ -156,47 +219,46 @@ export default function CompareModal(props: {
         splitNumber: splitY,
         splitLine: { lineStyle: { type: "dashed" } },
       },
-      series: [
-        ...seriesOf(a.name, pa, COLOR_A),
-        ...seriesOf(b.name, pb, COLOR_B),
-      ],
+      series: plots.flatMap((pts, i) => seriesOf(names[i], pts, compareColor(i))),
     };
-  }, [a, b, disA, disB, alignCenters, chartBox]);
+  }, [names, sides, alignCenters, chartBox]);
 
-  const dispersionRows = useMemo(() => {
-    if (!disA || !disB) return [];
+  const dispersionRows = useMemo<DispRowView[]>(() => {
     const pct = (v: number | null) => (v === null ? null : v * 100);
-    const mk = (
+    const pick = (
       label: string,
-      x: number | null,
-      y: number | null,
       digits: number,
-      suffix = ""
-    ) => ({
+      suffix: string,
+      get: (s: (typeof sides)[number]) => number | null
+    ): DispRowView => ({
       label,
-      a: x,
-      b: y,
-      diff: x !== null && y !== null ? y - x : null,
       digits,
       suffix,
+      values: sides.map(get),
     });
     return [
-      mk("标点数", disA.n, disB.n, 0),
-      mk("平均环数", disA.meanRing, disB.meanRing, 3),
-      mk("平均散布距离", disA.avgDist, disB.avgDist, 2, " mm"),
-      mk("最小包围圆半径", disA.mecRadius, disB.mecRadius, 2, " mm"),
-      mk("小装甲命中率", pct(disA.hitSmall), pct(disB.hitSmall), 1, "%"),
-      mk("大装甲命中率", pct(disA.hitLarge), pct(disB.hitLarge), 1, "%"),
-      mk("飞镖命中率", pct(disA.hitDart), pct(disB.hitDart), 1, "%"),
+      pick("标点数", 0, "", (s) => (s.hasData ? s.n : null)),
+      pick("平均环数", 3, "", (s) => s.meanRing),
+      pick("平均散布距离", 2, " mm", (s) => s.avgDist),
+      pick("最小包围圆半径", 2, " mm", (s) => s.mecRadius),
+      pick("小装甲命中率", 1, "%", (s) => pct(s.hitSmall)),
+      pick("大装甲命中率", 1, "%", (s) => pct(s.hitLarge)),
+      pick("飞镖命中率", 1, "%", (s) => pct(s.hitDart)),
     ];
-  }, [disA, disB]);
+  }, [sides]);
 
   const speedOption = useMemo<EChartsOption>(() => {
-    if (!a || !b) return {};
-    const maxN = Math.max(a.shots.length, b.shots.length);
+    if (picked.length === 0) return {};
+    const maxN = picked.reduce((m, g) => Math.max(m, g.shots.length), 0);
     const idx = Array.from({ length: maxN }, (_, i) => String(i + 1));
-    const pick = (g: typeof a) => g!.shots.map((s) => s.speed_mps);
-    const seriesOf = (name: string, data: number[], color: string, mean: number) =>
+    const meanOf = (arr: number[]) =>
+      arr.length > 0 ? arr.reduce((x, y) => x + y, 0) / arr.length : 0;
+    const seriesOf = (
+      name: string,
+      data: number[],
+      color: string,
+      mean: number
+    ) =>
       ({
         name,
         type: "line",
@@ -214,32 +276,35 @@ export default function CompareModal(props: {
           data: [{ yAxis: mean }],
         },
       }) as SeriesOption;
-    const meanOf = (arr: number[]) =>
-      arr.length > 0 ? arr.reduce((x, y) => x + y, 0) / arr.length : 0;
-    const da = pick(a);
-    const db = pick(b);
     return {
       animation: true,
       animationDuration: 300,
       animationDurationUpdate: 250,
       animationEasingUpdate: "cubicOut",
       grid: { left: 60, right: 24, top: 44, bottom: 46 },
-      legend: { top: 4, textStyle: { fontSize: 11 } },
+      legend: { type: "scroll", top: 4, textStyle: { fontSize: 11 } },
       tooltip: { trigger: "axis" },
       xAxis: { type: "category", data: idx, name: "发序号" },
-      yAxis: { type: "value", scale: true, name: "m/s" },
-      series: [
-        seriesOf(a.name, da, COLOR_A, meanOf(da)),
-        seriesOf(b.name, db, COLOR_B, meanOf(db)),
-      ],
+      yAxis: {
+        type: "value",
+        scale: true,
+        name: "m/s",
+        // 竖排贴轴放，避免与顶部图例抢位置
+        nameLocation: "middle",
+        nameRotate: 90,
+        nameGap: 46,
+      },
+      series: picked.map((g, i) => {
+        const data = g.shots.map((s) => s.speed_mps);
+        return seriesOf(g.name, data, compareColor(i), meanOf(data));
+      }),
     };
-  }, [a, b]);
+  }, [picked]);
 
   const histOption = useMemo<EChartsOption>(() => {
-    if (!a || !b) return {};
-    const h = pairedHistogram(
-      a.shots.map((s) => s.speed_mps),
-      b.shots.map((s) => s.speed_mps)
+    if (picked.length === 0) return {};
+    const h = groupedHistogram(
+      picked.map((g) => g.shots.map((s) => s.speed_mps))
     );
     return {
       animation: true,
@@ -247,46 +312,53 @@ export default function CompareModal(props: {
       animationDurationUpdate: 250,
       animationEasingUpdate: "cubicOut",
       grid: { left: 56, right: 24, top: 44, bottom: 46 },
-      legend: { top: 4, textStyle: { fontSize: 11 } },
+      legend: { type: "scroll", top: 4, textStyle: { fontSize: 11 } },
       tooltip: { trigger: "axis" },
       xAxis: {
         type: "category",
         data: h.centers.map((c) => c.toFixed(3)),
         name: "m/s",
       },
-      yAxis: { type: "value", name: "频数" },
-      series: [
-        {
-          name: a.name,
-          type: "bar",
-          data: h.a,
-          itemStyle: { color: COLOR_A, opacity: 0.65 },
-        },
-        {
-          name: b.name,
-          type: "bar",
-          data: h.b,
-          itemStyle: { color: COLOR_B, opacity: 0.65 },
-        },
-      ],
+      yAxis: {
+        type: "value",
+        name: "频数",
+        nameLocation: "middle",
+        nameRotate: 90,
+        nameGap: 46,
+      },
+      series: h.counts.map((counts, i) => ({
+        name: names[i],
+        type: "bar",
+        data: counts,
+        itemStyle: { color: compareColor(i), opacity: 0.65 },
+      })),
     };
-  }, [a, b]);
+  }, [picked, names]);
 
-  const speedSpread = useMemo(() => {
-    if (a && b) {
-      const ma = a.shots.reduce((x, s) => x + s.speed_mps, 0) / (a.shots.length || 1);
-      const mb = b.shots.reduce((x, s) => x + s.speed_mps, 0) / (b.shots.length || 1);
-      return mb - ma;
-    }
-    return 0;
-  }, [a, b]);
+  /** 各组均值区间（浮动/回归，非全距） */
+  const meanSpan = useMemo(() => {
+    const means = picked
+      .map((g) =>
+        g.shots.length > 0
+          ? g.shots.reduce((x, s) => x + s.speed_mps, 0) / g.shots.length
+          : null
+      )
+      .filter((v): v is number => v !== null);
+    if (means.length < 2) return null;
+    const lo = Math.min(...means);
+    const hi = Math.max(...means);
+    return { lo, hi, span: hi - lo };
+  }, [picked]);
 
   const handleExport = async () => {
-    if (!a || !b) return;
+    if (picked.length < 2) return;
     try {
       const ok = await saveCsv(
-        `对比_${a.name}_vs_${b.name}.csv`,
-        buildCompareCsv(a, b, cfgA, cfgB)
+        `对比_${names.join("_vs_")}.csv`,
+        buildCompareCsv(
+          picked,
+          picked.map((g) => g.waveConfig ?? globalWaveConfig)
+        )
       );
       if (ok) message.success("对比结果已导出");
     } catch (e) {
@@ -294,30 +366,165 @@ export default function CompareModal(props: {
     }
   };
 
-  const hasWave = wheelRows.some(
-    (w) => w.aDrop !== null || w.bDrop !== null
+  const hasWave = wheels.some((w) => w.drops.some((v) => v !== null));
+  const headerTag = (i: number) => (
+    <span style={{ color: compareColor(i) }}>{names[i]}</span>
   );
+
+  const statsColumns: TableColumnsType<StatRowView> = [
+    { title: "指标", dataIndex: "label", width: 150, fixed: "left" },
+    ...picked.map((_, i) => ({
+      title: headerTag(i),
+      key: `g${i}`,
+      render: (_: unknown, r: StatRowView) => fmtCell(r.values[i], r.digits),
+    })),
+    ...(picked.length === 2
+      ? ([
+          {
+            title: "差值 (B-A)",
+            key: "diff",
+            render: (_: unknown, r: StatRowView) =>
+              r.diff === null || r.diff === undefined || !isFinite(r.diff) ? (
+                "-"
+              ) : (
+                <span
+                  style={{
+                    color:
+                      Math.abs(r.diff) < 1e-12
+                        ? "#888"
+                        : r.diff > 0
+                          ? "#fa541c"
+                          : "#1677ff",
+                  }}
+                >
+                  {r.diff > 0 ? "+" : ""}
+                  {r.diff.toFixed(r.digits)}
+                </span>
+              ),
+          },
+          {
+            title: "95% 置信区间",
+            key: "ci",
+            width: 190,
+            render: (_: unknown, r: StatRowView) =>
+              r.ciLow === null || r.ciLow === undefined ? (
+                "-"
+              ) : (
+                <span style={{ fontSize: 12, color: "#666" }}>
+                  {r.ciLow.toFixed(r.digits)} ~ {(r.ciHigh ?? 0).toFixed(r.digits)}
+                </span>
+              ),
+          },
+          {
+            title: "p 值",
+            key: "p",
+            width: 90,
+            render: (_: unknown, r: StatRowView) => pCell(r.p),
+          },
+        ] as TableColumnsType<StatRowView>)
+      : []),
+  ];
+
+  const dispersionColumns: TableColumnsType<DispRowView> = [
+    { title: "指标", dataIndex: "label", width: 130, fixed: "left" },
+    ...picked.map((_, i) => ({
+      title: headerTag(i),
+      key: `d${i}`,
+      render: (_: unknown, r: DispRowView) =>
+        fmtCell(r.values[i], r.digits, r.suffix),
+    })),
+    ...(picked.length === 2
+      ? ([
+          {
+            title: "差值 (B-A)",
+            key: "diff",
+            render: (_: unknown, r: DispRowView) => {
+              const [x, y] = r.values;
+              if (x === null || y === null || x === undefined || y === undefined)
+                return "-";
+              const d = y - x;
+              return (
+                <span
+                  style={{
+                    color:
+                      Math.abs(d) < 1e-9 ? "#888" : d > 0 ? "#fa541c" : "#1677ff",
+                  }}
+                >
+                  {d > 0 ? "+" : ""}
+                  {d.toFixed(r.digits)}
+                  {r.suffix}
+                </span>
+              );
+            },
+          },
+        ] as TableColumnsType<DispRowView>)
+      : []),
+  ];
+
+  const wheelColumns: TableColumnsType<(typeof wheels)[number]> = [
+    { title: "轮组", dataIndex: "name", width: 110, fixed: "left" },
+    ...picked.map((_, i) => ({
+      title: headerTag(i),
+      key: `w${i}`,
+      render: (_: unknown, r: (typeof wheels)[number]) => (
+        <span>
+          {r.drops[i] === null ? "-" : `${r.drops[i]!.toFixed(2)}%`}
+          <span style={{ color: "#bbb", fontSize: 11 }}>
+            {" "}
+            / {r.spreads[i] === null ? "-" : r.spreads[i]!.toFixed(0)}
+          </span>
+        </span>
+      ),
+    })),
+  ];
+
+  const pairRows = names.map((n, i) => ({ key: i, name: n, cells: pairwise[i] }));
+  const pairColumns: TableColumnsType<(typeof pairRows)[number]> = [
+    {
+      title: "组 \\ 组",
+      dataIndex: "name",
+      width: 240,
+      fixed: "left",
+      ellipsis: true,
+    },
+    ...picked.map((_, j) => ({
+      title: headerTag(j),
+      key: `p${j}`,
+      render: (_: unknown, r: (typeof pairRows)[number]) =>
+        j <= r.key ? <span style={{ color: "#ddd" }}>—</span> : pCell(r.cells[j]),
+    })),
+  ];
 
   return (
     <Modal
       title={
-        <Space>
+        <Space size={6} wrap>
           <FundOutlined />
-          两组对比
-          {a && b && (
-            <span style={{ color: "#888", fontWeight: 400, fontSize: 13 }}>
-              <Tag color={COLOR_A}>{a.name}</Tag>vs
-              <Tag color={COLOR_B}>{b.name}</Tag>
+          {multi ? `${picked.length} 组对比` : "两组对比"}
+          <span style={{ fontWeight: 400, fontSize: 13 }}>
+            {picked.map((g, i) => (
+              <Tag key={g.id} color={compareColor(i)}>
+                {g.name}
+              </Tag>
+            ))}
+          </span>
+          {tooManyColors && (
+            <span style={{ fontSize: 12, color: "#faad14", fontWeight: 400 }}>
+              组数超过 10，配色循环使用
             </span>
           )}
         </Space>
       }
       open={props.open}
       onCancel={props.onClose}
-      width="88%"
+      width="90%"
       centered
       styles={{
-        body: { maxHeight: "calc(100vh - 180px)", overflowY: "auto", paddingRight: 8 },
+        body: {
+          maxHeight: "calc(100vh - 180px)",
+          overflowY: "auto",
+          paddingRight: 8,
+        },
       }}
       footer={
         <Space style={{ width: "100%", justifyContent: "space-between" }}>
@@ -330,10 +537,10 @@ export default function CompareModal(props: {
             清除勾选
           </Button>
           <Space>
-            {a && b && (
+            {meanSpan && (
               <span style={{ color: "#888", fontSize: 12 }}>
-                均值差 {speedSpread >= 0 ? "+" : ""}
-                {speedSpread.toFixed(4)} m/s（B-A）
+                均值区间 {meanSpan.lo.toFixed(4)} ~ {meanSpan.hi.toFixed(4)} m/s（极差{" "}
+                {meanSpan.span.toFixed(4)}）
               </span>
             )}
             <Button icon={<DownloadOutlined />} onClick={handleExport}>
@@ -343,8 +550,8 @@ export default function CompareModal(props: {
         </Space>
       }
     >
-      {!a || !b ? (
-        <Empty description="请先在测试记录里勾选两组" />
+      {picked.length < 2 ? (
+        <Empty description="请先在测试记录里勾选至少两组" />
       ) : (
         <Space direction="vertical" style={{ width: "100%" }} size="middle">
           <div style={{ display: "flex", gap: 12 }}>
@@ -354,7 +561,11 @@ export default function CompareModal(props: {
               style={{ flex: 1, minWidth: 0 }}
               styles={{ body: { padding: 4 } }}
             >
-              <ReactECharts option={speedOption} style={{ height: 260 }} notMerge />
+              <ReactECharts
+                option={speedOption}
+                style={{ height: 260 }}
+                notMerge
+              />
             </Card>
             <Card
               size="small"
@@ -362,16 +573,23 @@ export default function CompareModal(props: {
               style={{ flex: 1, minWidth: 0 }}
               styles={{ body: { padding: 4 } }}
             >
-              <ReactECharts option={histOption} style={{ height: 260 }} notMerge />
+              <ReactECharts
+                option={histOption}
+                style={{ height: 260 }}
+                notMerge
+              />
             </Card>
           </div>
+
           <Card
             size="small"
             title={
-              <Space size={8}>
+              <Space size={8} wrap>
                 <span>统计指标对比</span>
                 <span style={{ fontSize: 12, color: "#999", fontWeight: 400 }}>
-                  均值差用 Welch t 检验；极差/标准差用 bootstrap 重采样
+                  {picked.length === 2
+                    ? "均值差用 Welch t 检验；极差/标准差用 bootstrap 重采样"
+                    : "列顺序即勾选顺序"}
                 </span>
               </Space>
             }
@@ -381,119 +599,134 @@ export default function CompareModal(props: {
               size="small"
               rowKey="label"
               pagination={false}
-              dataSource={statsRows}
-              columns={[
-                { title: "指标", dataIndex: "label", width: 160 },
-                {
-                  title: a.name,
-                  dataIndex: "a",
-                  render: (v: number | null, r) =>
-                    v === null || !isFinite(v) ? "-" : v.toFixed(r.digits),
-                },
-                {
-                  title: b.name,
-                  dataIndex: "b",
-                  render: (v: number | null, r) =>
-                    v === null || !isFinite(v) ? "-" : v.toFixed(r.digits),
-                },
-                {
-                  title: "差值 (B-A)",
-                  dataIndex: "diff",
-                  render: (v: number | null, r) =>
-                    v === null || !isFinite(v) ? (
-                      "-"
-                    ) : (
-                      <span
-                        style={{
-                          color:
-                            Math.abs(v) < 1e-12
-                              ? "#888"
-                              : v > 0
-                                ? "#fa541c"
-                                : "#1677ff",
-                        }}
-                      >
-                        {v > 0 ? "+" : ""}
-                        {v.toFixed(r.digits)}
-                      </span>
-                    ),
-                },
-                {
-                  title: "95% 置信区间",
-                  dataIndex: "ciLow",
-                  width: 200,
-                  render: (v: number | null | undefined, r) =>
-                    v === null || v === undefined ? (
-                      "-"
-                    ) : (
-                      <span style={{ fontSize: 12, color: "#666" }}>
-                        {v.toFixed(r.digits)} ~ {(r.ciHigh ?? 0).toFixed(r.digits)}
-                      </span>
-                    ),
-                },
-                {
-                  title: "p 值",
-                  dataIndex: "p",
-                  width: 90,
-                  render: (v: number | null | undefined) =>
-                    v === null || v === undefined ? (
-                      "-"
-                    ) : (
-                      <span
-                        style={{
-                          fontWeight: v < 0.05 ? 700 : 400,
-                          color: v < 0.05 ? "#fa541c" : "#888",
-                        }}
-                      >
-                        {v < 0.001 ? "<0.001" : v.toFixed(3)}
-                      </span>
-                    ),
-                },
-              ]}
+              scroll={{ x: "max-content" }}
+              dataSource={statRows}
+              columns={statsColumns}
             />
           </Card>
+
+          {multi && (
+            <Card
+              size="small"
+              title={
+                <Space size={6} wrap>
+                  <span>组间差异检验</span>
+                  <Tooltip
+                    title={
+                      <div style={{ fontSize: 12, lineHeight: 1.7 }}>
+                        先把这几组放一起，看「整体上有没有差别」：
+                        <br />
+                        均值用 Welch 单因素方差分析（F 检验，不要求各组方差相等）；
+                        <br />
+                        极差与标准差这类分布未知的指标用置换检验（把标签打乱 1000 次，
+                        看真实分组有多极端）。
+                        <br />
+                        p &lt; 0.05 表示这几组整体上有差异；具体差在哪两组，看下面的两两比较。
+                      </div>
+                    }
+                  >
+                    <QuestionCircleOutlined style={{ color: "#999" }} />
+                  </Tooltip>
+                </Space>
+              }
+              styles={{ body: { padding: 0 } }}
+            >
+              <Table
+                size="small"
+                rowKey="label"
+                pagination={false}
+                dataSource={overall}
+                columns={[
+                  { title: "指标", dataIndex: "label", width: 90 },
+                  { title: "检验方法", dataIndex: "method", width: 240 },
+                  {
+                    title: (
+                      <Tooltip title="均值一行是 F 值（括号内为两个自由度）；极差/标准差一行是置换检验的组间方差">
+                        <span>
+                          检验统计量{" "}
+                          <QuestionCircleOutlined style={{ color: "#bbb" }} />
+                        </span>
+                      </Tooltip>
+                    ),
+                    dataIndex: "stat",
+                    width: 140,
+                    render: (v: number | null) => (v === null ? "-" : v.toFixed(4)),
+                  },
+                  {
+                    title: "p 值",
+                    dataIndex: "p",
+                    width: 100,
+                    render: (v: number | null) => pCell(v),
+                  },
+                ]}
+              />
+              <div
+                style={{
+                  padding: "10px 12px 0",
+                  fontSize: 12,
+                  color: "#666",
+                }}
+              >
+                均值两两比较（Welch t 检验，格内为 p 值）
+                <Tooltip
+                  title={
+                    <div style={{ fontSize: 12, lineHeight: 1.7 }}>
+                      每一对组单独做一次 t 检验，格子里就是这一对的 p 值：
+                      <br />
+                      p &lt; 0.05 说明这两组均值差异显著（红色加粗）。
+                      <br />
+                      组多时两两比较的次数会变多，偶尔出现的 p &lt; 0.05 可能只是巧合，
+                      这里没有做多重比较校正，判断时请结合 p 值大小与样本量。
+                    </div>
+                  }
+                >
+                  <QuestionCircleOutlined style={{ marginLeft: 4, color: "#999" }} />
+                </Tooltip>
+                <span style={{ color: "#bbb", marginLeft: 8 }}>
+                  只填右上三角（A 对 B 与 B 对 A 相同）
+                </span>
+              </div>
+              <Table
+                size="small"
+                rowKey="key"
+                pagination={false}
+                scroll={{ x: "max-content" }}
+                dataSource={pairRows}
+                columns={pairColumns}
+                style={{ marginTop: 4 }}
+              />
+            </Card>
+          )}
+
           {hasWave && (
             <Card
               size="small"
-              title="摩擦轮指标对比（各组有波形数据的发平均）"
+              title={
+                <Space size={8} wrap>
+                  <span>摩擦轮指标对比（各组有波形数据的发平均）</span>
+                  <span style={{ fontSize: 12, color: "#999", fontWeight: 400 }}>
+                    平均掉速% / 平均轮间差
+                  </span>
+                </Space>
+              }
               styles={{ body: { padding: 0 } }}
             >
               <Table
                 size="small"
                 rowKey="name"
                 pagination={false}
-                dataSource={wheelRows}
-                columns={[
-                  { title: "轮组", dataIndex: "name", width: 120 },
-                  {
-                    title: `平均掉速% · ${a.name}`,
-                    dataIndex: "aDrop",
-                    render: (v: number | null) => (v === null ? "-" : `${v.toFixed(2)}%`),
-                  },
-                  {
-                    title: `平均掉速% · ${b.name}`,
-                    dataIndex: "bDrop",
-                    render: (v: number | null) => (v === null ? "-" : `${v.toFixed(2)}%`),
-                  },
-                  {
-                    title: "平均轮间差 A",
-                    dataIndex: "aSpread",
-                    render: (v: number | null) => (v === null ? "-" : v.toFixed(1)),
-                  },
-                  {
-                    title: "平均轮间差 B",
-                    dataIndex: "bSpread",
-                    render: (v: number | null) => (v === null ? "-" : v.toFixed(1)),
-                  },
-                ]}
+                scroll={{ x: "max-content" }}
+                dataSource={wheels}
+                columns={wheelColumns}
               />
             </Card>
           )}
-          {(disA?.hasData || disB?.hasData) && (
+
+          {sides.some((s) => s.hasData) && (
             <Card
               size="small"
               title={
-                <Space size={8}>
+                <Space size={8} wrap>
                   <span>散布对比（靶纸落点，圆点为一发弹孔）</span>
                   <span style={{ color: "#888", fontWeight: 400, fontSize: 12 }}>
                     {alignCenters
@@ -503,7 +736,7 @@ export default function CompareModal(props: {
                 </Space>
               }
               extra={
-                <Tooltip title="把两组落点平移到各自弹着中心重合，直接比散布形状；关掉则按靶纸上的真实位置对比（可看出归零差异）">
+                <Tooltip title="把各组落点平移到各自弹着中心重合，直接比散布形状；关掉则按靶纸上的真实位置对比（可看出归零差异）">
                   <Space size={4}>
                     <Switch
                       size="small"
@@ -516,62 +749,46 @@ export default function CompareModal(props: {
               }
               styles={{ body: { padding: 4 } }}
             >
-              <div style={{ display: "flex", gap: 12, alignItems: "stretch" }}>
-                <div style={{ flex: 1, minWidth: 0 }} ref={chartWrapRef}>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 12,
+                  // 多组时表格列多，放到图下方通栏展示（免得横向滚动看数据），
+                  // 图则保持近方形宽度，否则等比例尺下 x 轴会被拉宽、落点缩成一小团
+                  alignItems: multi ? "center" : "stretch",
+                  flexDirection: multi ? "column" : "row",
+                }}
+              >
+                <div
+                  style={{
+                    flex: multi ? undefined : 1,
+                    width: multi ? 820 : undefined,
+                    maxWidth: "100%",
+                    minWidth: 0,
+                  }}
+                  ref={chartWrapRef}
+                >
                   <ReactECharts
                     option={dispersionOption}
                     style={{ height: 340 }}
                     notMerge
                   />
                 </div>
-                <div style={{ width: 400, flexShrink: 0 }}>
+                <div
+                  style={{
+                    flexShrink: 0,
+                    width: multi ? "100%" : 420,
+                    minWidth: 0,
+                    alignSelf: "stretch",
+                  }}
+                >
                   <Table
                     size="small"
                     rowKey="label"
                     pagination={false}
+                    scroll={{ x: "max-content" }}
                     dataSource={dispersionRows}
-                    columns={[
-                      { title: "指标", dataIndex: "label", width: 130 },
-                      {
-                        title: a.name,
-                        dataIndex: "a",
-                        render: (v: number | null, r) =>
-                          v === null || !isFinite(v)
-                            ? "-"
-                            : `${v.toFixed(r.digits)}${r.suffix}`,
-                      },
-                      {
-                        title: b.name,
-                        dataIndex: "b",
-                        render: (v: number | null, r) =>
-                          v === null || !isFinite(v)
-                            ? "-"
-                            : `${v.toFixed(r.digits)}${r.suffix}`,
-                      },
-                      {
-                        title: "差值 (B-A)",
-                        dataIndex: "diff",
-                        render: (v: number | null, r) =>
-                          v === null || !isFinite(v) ? (
-                            "-"
-                          ) : (
-                            <span
-                              style={{
-                                color:
-                                  Math.abs(v) < 1e-9
-                                    ? "#888"
-                                    : v > 0
-                                      ? "#fa541c"
-                                      : "#1677ff",
-                              }}
-                            >
-                              {v > 0 ? "+" : ""}
-                              {v.toFixed(r.digits)}
-                              {r.suffix}
-                            </span>
-                          ),
-                      },
-                    ]}
+                    columns={dispersionColumns}
                   />
                 </div>
               </div>

@@ -10,10 +10,13 @@ import {
   hotGunDelta,
   intervalStats,
   outliers,
+  pairwiseWelch,
   passRate,
+  permutationTest,
   tCritical95,
   tTwoTailedP,
   trendSlope,
+  welchAnova,
   welchTTest,
 } from "./analysis";
 import { EMPTY_PARAMS } from "./types";
@@ -286,5 +289,54 @@ describe("groupSummary", () => {
     );
     expect(row.r50).toBeCloseTo(5, 6);
     expect(row.wheelDropPct).toBeNull(); // 该组没有波形快照
+  });
+});
+
+describe("多组显著性检验", () => {
+  /** 均值 base、有小抖动的样本（方差 > 0，避免 ANOVA 退化） */
+  const mk = (base: number, n = 6, jitter = 0.01) =>
+    Array.from({ length: n }, (_, i) => base + (i % 2 === 0 ? jitter : -jitter));
+  const rangeStat = (v: number[]) => Math.max(...v) - Math.min(...v);
+
+  it("welchAnova: 均值相同 p 大，差异大 p 小", () => {
+    const same = welchAnova([mk(15), mk(15), mk(15)])!;
+    expect(same.p).toBeGreaterThan(0.05);
+    expect(same.df1).toBe(2); // k-1 自由度
+    const apart = welchAnova([mk(15), mk(15.5), mk(16)])!;
+    expect(apart.p).toBeLessThan(0.001);
+    expect(apart.f).toBeGreaterThan(same.f);
+  });
+
+  it("welchAnova: 不足三组或存在零方差组时不给结果", () => {
+    expect(welchAnova([mk(15), mk(16)])).toBeNull();
+    expect(welchAnova([[15, 15, 15], [16, 16, 16], [17, 17, 17]])).toBeNull();
+  });
+
+  it("permutationTest: 各组散布不同时 p 小", () => {
+    const tight = [15.0, 15.01, 14.99, 15.0];
+    const loose = [15.4, 14.6, 15.2, 14.8];
+    // 三组散布一致 → 打乱标签也能得到同样的组间方差，p 接近 1
+    expect(permutationTest([tight, tight, tight], rangeStat)!.p).toBeGreaterThan(0.5);
+    // 一组明显更散 → p 小
+    const apart = permutationTest([tight, tight, loose], rangeStat)!;
+    expect(apart.p).toBeLessThan(0.05);
+    expect(apart.observed).toBeGreaterThan(0);
+    expect(permutationTest([mk(15), mk(16)], rangeStat)).toBeNull();
+  });
+
+  it("permutationTest 固定种子可复现", () => {
+    const gs = [mk(15), mk(15.3), mk(15.6)];
+    const mean = (v: number[]) => v.reduce((x, y) => x + y, 0) / v.length;
+    expect(permutationTest(gs, mean)!.p).toBe(permutationTest(gs, mean)!.p);
+  });
+
+  it("pairwiseWelch: 只填上三角，同分布两组 p 接近 1", () => {
+    const m = pairwiseWelch([mk(15), mk(15), mk(16)]);
+    expect(m[0][0]).toBeNull();
+    expect(m[1][0]).toBeNull();
+    expect(m[2][1]).toBeNull();
+    expect(m[0][1]!).toBeGreaterThan(0.9);
+    expect(m[0][2]!).toBeLessThan(0.001);
+    expect(m[1][2]!).toBeLessThan(0.001);
   });
 });

@@ -355,6 +355,108 @@ export function bootstrapDiff(
   };
 }
 
+/** F 分布上尾 p 值 P(F > f) */
+export function fUpperTailP(f: number, df1: number, df2: number): number {
+  if (!Number.isFinite(f) || f <= 0 || df1 <= 0 || df2 <= 0) return 1;
+  return 1 - betai(df1 / 2, df2 / 2, (df1 * f) / (df1 * f + df2));
+}
+
+export interface AnovaTest {
+  /** F 统计量 */
+  f: number;
+  df1: number;
+  df2: number;
+  /** 上尾 p 值 */
+  p: number;
+  /** 参与检验的组数 */
+  k: number;
+}
+
+/** Welch 单因素方差分析（不要求各组方差相等）：多组均值是否"整体上不同" */
+export function welchAnova(groups: number[][]): AnovaTest | null {
+  const gs = groups.filter((g) => g.length >= 2);
+  const k = gs.length;
+  if (k < 3) return null;
+  const mean = (v: number[]) => v.reduce((x, y) => x + y, 0) / v.length;
+  const varr = (v: number[]) => {
+    const m = mean(v);
+    return v.reduce((s, x) => s + (x - m) ** 2, 0) / (v.length - 1);
+  };
+  const ns = gs.map((g) => g.length);
+  const ms = gs.map(mean);
+  const vs = gs.map(varr);
+  // 方差为 0 的组权重发散，直接放弃检验
+  if (vs.some((v) => v <= 0)) return null;
+  const ws = ns.map((n, i) => n / vs[i]);
+  const W = ws.reduce((x, y) => x + y, 0);
+  if (!Number.isFinite(W) || W <= 0) return null;
+  const ybar = ws.reduce((s, w, i) => s + w * ms[i], 0) / W;
+  const A = ws.reduce((s, w, i) => s + w * (ms[i] - ybar) ** 2, 0) / (k - 1);
+  const term = ws.reduce((s, w, i) => s + (1 - w / W) ** 2 / (ns[i] - 1), 0);
+  const B = 1 + (2 * (k - 2) * term) / (k * k - 1);
+  const df2 = 1 / ((3 / (k * k - 1)) * term);
+  const f = A / B;
+  return { f, df1: k - 1, df2, p: fUpperTailP(f, k - 1, df2), k };
+}
+
+export interface PermTest {
+  /** 观测到的组间方差（各组统计量的方差） */
+  observed: number;
+  p: number;
+  k: number;
+}
+
+/**
+ * 组间差异的置换检验：打乱标签重算「各组统计量的方差」，看真实分组有多极端。
+ * 不依赖正态假设，适合极差/标准差这类分布未知的指标。
+ */
+export function permutationTest(
+  groups: number[][],
+  stat: (v: number[]) => number,
+  iters = 1000,
+  seed = 20261002
+): PermTest | null {
+  const gs = groups.filter((g) => g.length >= 2);
+  if (gs.length < 3) return null;
+  const spread = (parts: number[][]) => {
+    const ss = parts.map(stat);
+    const m = ss.reduce((x, y) => x + y, 0) / ss.length;
+    return ss.reduce((s, x) => s + (x - m) ** 2, 0) / (ss.length - 1);
+  };
+  const observed = spread(gs);
+  const sizes = gs.map((g) => g.length);
+  const work = gs.flat();
+  const rng = makeRng(seed);
+  let ge = 0;
+  for (let i = 0; i < iters; i++) {
+    for (let j = work.length - 1; j > 0; j--) {
+      const k = Math.floor(rng() * (j + 1));
+      const tmp = work[j];
+      work[j] = work[k];
+      work[k] = tmp;
+    }
+    let at = 0;
+    const parts = sizes.map((n) => {
+      const seg = work.slice(at, at + n);
+      at += n;
+      return seg;
+    });
+    if (spread(parts) >= observed - 1e-12) ge++;
+  }
+  return { observed, p: (ge + 1) / (iters + 1), k: gs.length };
+}
+
+/** 两两 Welch t 检验的 p 值矩阵（i<j 才有值，其余为 null） */
+export function pairwiseWelch(groups: number[][]): (number | null)[][] {
+  return groups.map((a, i) =>
+    groups.map((b, j) => {
+      if (j <= i) return null;
+      const t = welchTTest(a, b);
+      return t ? t.p : null;
+    })
+  );
+}
+
 export interface GroupSummaryRow {
   id: number;
   name: string;

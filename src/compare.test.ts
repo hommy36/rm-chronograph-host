@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   buildCompareCsv,
-  compareDispersion,
   compareStatsRows,
   compareWheelRows,
   equalScaleRanges,
   groupDispersion,
-  pairedHistogram,
+  groupedHistogram,
+  overallTests,
+  pairwiseMeanP,
   recenterToMean,
+  statsRowsOf,
 } from "./compare";
 import type { Group, WaveConfig } from "./types";
 import { EMPTY_PARAMS } from "./types";
@@ -73,19 +75,39 @@ describe("compareStatsRows", () => {
   });
 });
 
-describe("pairedHistogram", () => {
-  it("两组共用分箱且总数守恒", () => {
-    const h = pairedHistogram([15.0, 15.5, 16.0], [15.2, 15.6], 5);
+describe("statsRowsOf 多组指标表", () => {
+  it("列数与组数一致，空组给空值", () => {
+    const rows = statsRowsOf([
+      group(1, "A", [15.0, 15.2], null),
+      group(2, "B", [15.1], null),
+      group(3, "C", [], null),
+    ]);
+    expect(rows).toHaveLength(7);
+    const mean = rows.find((r) => r.label.startsWith("均值"))!;
+    expect(mean.values).toHaveLength(3);
+    expect(mean.values[0]).toBeCloseTo(15.1, 6);
+    expect(mean.values[2]).toBeNull();
+    const n = rows.find((r) => r.label === "样本数")!;
+    expect(n.values.map((v) => v)).toEqual([2, 1, 0]);
+  });
+});
+
+describe("groupedHistogram", () => {
+  it("多组共用分箱且各自总数守恒", () => {
+    const h = groupedHistogram([[15.0, 15.5, 16.0], [15.2, 15.6], [15.3]], 5);
     expect(h.centers).toHaveLength(5);
-    expect(h.a.reduce((x, y) => x + y, 0)).toBe(3);
-    expect(h.b.reduce((x, y) => x + y, 0)).toBe(2);
+    expect(h.counts).toHaveLength(3);
+    expect(h.counts.map((c) => c.reduce((x, y) => x + y, 0))).toEqual([3, 2, 1]);
   });
 
   it("全同值时退化为一箱", () => {
-    const h = pairedHistogram([15, 15], [15], 5);
+    const h = groupedHistogram([[15, 15], [15]], 5);
     expect(h.centers).toHaveLength(1);
-    expect(h.a[0]).toBe(2);
-    expect(h.b[0]).toBe(1);
+    expect(h.counts).toEqual([[2], [1]]);
+  });
+
+  it("没有数据时不崩", () => {
+    expect(groupedHistogram([[], []])).toEqual({ centers: [], counts: [[], []] });
   });
 });
 
@@ -93,23 +115,40 @@ describe("compareWheelRows", () => {
   it("统计各组平均掉速%与轮间差", () => {
     const a = group(1, "A", [15, 15], 400);
     const b = group(2, "B", [15, 15], 200);
-    const rows = compareWheelRows(a, b, CFG);
+    const rows = compareWheelRows([a, b], [CFG, CFG]);
     expect(rows).toHaveLength(2);
     const s1 = rows[0];
     expect(s1.name).toBe("一级");
-    expect(s1.aDrop!).toBeGreaterThan(s1.bDrop!); // A 掉速更深
-    expect(s1.aSpread!).toBeGreaterThan(0);
-    expect(s1.aShots).toBe(2);
+    expect(s1.drops[0]!).toBeGreaterThan(s1.drops[1]!); // A 掉速更深
+    expect(s1.spreads[0]!).toBeGreaterThan(0);
+    expect(s1.shots).toEqual([2, 2]);
+  });
+
+  it("三组时每行有三列", () => {
+    const rows = compareWheelRows(
+      [
+        group(1, "A", [15, 15], 400),
+        group(2, "B", [15, 15], 200),
+        group(3, "C", [15, 15], 100),
+      ],
+      [CFG, CFG, CFG]
+    );
+    expect(rows[0].drops).toHaveLength(3);
+    expect(rows[0].spreads).toHaveLength(3);
+    expect(rows[0].drops[0]!).toBeGreaterThan(rows[0].drops[2]!);
   });
 
   it("无波形数据时为 null", () => {
-    const rows = compareWheelRows(group(1, "A", [15], null), group(2, "B", [15], null), CFG);
-    expect(rows[0].aDrop).toBeNull();
-    expect(rows[0].aShots).toBe(0);
+    const rows = compareWheelRows(
+      [group(1, "A", [15], null), group(2, "B", [15], null)],
+      [CFG, CFG]
+    );
+    expect(rows[0].drops).toEqual([null, null]);
+    expect(rows[0].shots).toEqual([0, 0]);
   });
 });
 
-describe("groupDispersion / compareDispersion", () => {
+describe("groupDispersion", () => {
   /** 造一组落在 [280,220] 附近的靶纸点：A4 横向 297×210mm，图 1200×849px */
   function withDispersion(spread: number) {
     const g = group(1, "A", [15], null);
@@ -166,9 +205,7 @@ describe("groupDispersion / compareDispersion", () => {
     const empty = groupDispersion(group(1, "A", [15], null));
     expect(empty.hasData).toBe(false);
     expect(empty.pointsMm).toHaveLength(0);
-    const [x, y] = compareDispersion(group(1, "A", [], null), group(2, "B", [], null));
-    expect(x.hasData).toBe(false);
-    expect(y.hasData).toBe(false);
+    expect(groupDispersion(group(2, "B", [], null)).hasData).toBe(false);
   });
 
   it("recenterToMean 把点群重心平移到原点", () => {    const shifted = recenterToMean([
@@ -215,7 +252,7 @@ describe("equalScaleRanges", () => {
   });
 });
 
-describe("compareWheelRows 两组各用自己的通道分配", () => {
+describe("compareWheelRows 各组各用自己的通道分配", () => {
   it("轮组按名字对齐，缺失一侧留空", () => {
     const a = group(1, "A", [15, 15], 400);
     const b = group(2, "B", [15, 15], 200);
@@ -227,22 +264,82 @@ describe("compareWheelRows 两组各用自己的通道分配", () => {
       groups: [{ id: 1, name: "一级", channels: [0, 2] }, { id: 2, name: "二级", channels: [1, 3] }],
       channelLabels: {},
     };
-    const rows = compareWheelRows(a, b, cfgA, cfgB);
+    const rows = compareWheelRows([a, b], [cfgA, cfgB]);
     expect(rows.map((r) => r.name)).toEqual(["一级", "二级"]);
-    expect(rows[0].aDrop).not.toBeNull();
-    expect(rows[0].bDrop).not.toBeNull();
-    // B 侧没有"二级"以外的问题：A 侧没有二级 → aDrop 为空
-    expect(rows[1].aDrop).toBeNull();
-    expect(rows[1].bDrop).not.toBeNull();
+    expect(rows[0].drops[0]).not.toBeNull();
+    expect(rows[0].drops[1]).not.toBeNull();
+    // A 组没有配"二级"轮组 → 该列留空
+    expect(rows[1].drops[0]).toBeNull();
+    expect(rows[1].drops[1]).not.toBeNull();
   });
 });
 
-describe("buildCompareCsv", () => {  it("包含指标、轮组与直方图分箱", () => {
-    const csv = buildCompareCsv(group(1, "A", [15, 15.2], 400), group(2, "B", [15.1, 15.3], 200), CFG);
-    expect(csv).toContain("指标,A(A),B(B),差值(B-A)");
+describe("多组整体检验", () => {
+  it("均值接近时 p 大，差异明显时 p 小", () => {
+    const same = [
+      group(1, "A", [15.0, 15.01, 15.02, 14.99], null),
+      group(2, "B", [15.0, 15.02, 15.01, 15.0], null),
+      group(3, "C", [15.01, 15.0, 14.99, 15.02], null),
+    ];
+    const apart = [
+      group(1, "A", [15.0, 15.01, 15.02, 14.99], null),
+      group(2, "B", [15.2, 15.21, 15.22, 15.19], null),
+      group(3, "C", [15.4, 15.41, 15.42, 15.39], null),
+    ];
+    const t1 = overallTests(same).find((r) => r.label === "均值")!;
+    const t2 = overallTests(apart).find((r) => r.label === "均值")!;
+    expect(t1.p!).toBeGreaterThan(0.05);
+    expect(t2.p!).toBeLessThan(0.01);
+    expect(t2.stat!).toBeGreaterThan(t1.stat!);
+  });
+
+  it("两组时不给整体检验", () => {
+    const rows = overallTests([
+      group(1, "A", [15, 15.1], null),
+      group(2, "B", [15.2, 15.3], null),
+    ]);
+    expect(rows).toEqual([]);
+  });
+
+  it("两两 p 矩阵只填上三角，同分布两组 p 大", () => {
+    const gs = [
+      group(1, "A", [15.0, 15.1, 15.05], null),
+      group(2, "B", [15.3, 15.31, 15.29], null),
+      group(3, "C", [15.3, 15.31, 15.29], null),
+    ];
+    const m = pairwiseMeanP(gs);
+    expect(m[0][0]).toBeNull();
+    expect(m[1][0]).toBeNull();
+    expect(m[0][1]!).toBeLessThan(0.05);
+    expect(m[1][2]!).toBeGreaterThan(0.9);
+  });
+});
+
+describe("buildCompareCsv", () => {
+  it("两组：每组一列 + 差值列 + 轮组 + 直方图", () => {
+    const csv = buildCompareCsv(
+      [group(1, "A", [15, 15.2], 400), group(2, "B", [15.1, 15.3], 200)],
+      [CFG, CFG]
+    );
+    expect(csv).toContain("指标,A,B");
     expect(csv).toContain("差值(B-A)");
     expect(csv).toContain("平均掉速%");
     expect(csv).toContain("箱中心(m/s),A 频数,B 频数");
     expect(csv.startsWith("\ufeff")).toBe(true);
+  });
+
+  it("三组及以上：整体检验与两两矩阵，不再有差值列", () => {
+    const csv = buildCompareCsv(
+      [
+        group(1, "A", [15, 15.2], null),
+        group(2, "B", [15.1, 15.3], null),
+        group(3, "C", [15.05, 15.25], null),
+      ],
+      [CFG, CFG, CFG]
+    );
+    expect(csv).toContain("指标,A,B,C");
+    expect(csv).toContain("整体差异检验,方法,统计量,p 值");
+    expect(csv).toContain("均值两两 Welch t 检验");
+    expect(csv).not.toContain("差值(B-A)");
   });
 });
